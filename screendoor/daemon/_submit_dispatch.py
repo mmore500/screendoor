@@ -72,7 +72,8 @@ def validate_dispatch(obj: dict) -> None:
         ("churn_maxretry", 0),
     ):
         value = obj.get(key, least)
-        if type(value) is not int or value < least:  # no bools
+        is_int = isinstance(value, int) and not isinstance(value, bool)
+        if not is_int or value < least:
             raise ValueError(f"{key} must be an integer of at least {least}")
     namespace = make_eval_namespace(obj.get("eval_context"))
     for key in ("assay", *HOOK_NAMES):
