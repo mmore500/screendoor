@@ -3,7 +3,7 @@ import os
 import shlex
 
 from ...auxlib._default_python_command import default_python_command
-from ...orchestrate.slurm import _run_slurm_command as _rsc
+from ...orch.slurm import _run_slurm_command as _rsc
 from .._notify_daemon import notify_daemon
 from ._render_daemon_sbatch import render_daemon_sbatch
 from ._requeue_successor import (

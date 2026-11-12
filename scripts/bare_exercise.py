@@ -21,11 +21,12 @@ dispatch = {
     "meta_treatment": "default",
     "meta_user": subprocess.check_output(["id", "-un"], text=True).strip(),
     "meta_attempt": subprocess.check_output(["date"], text=True).strip(),
-    "assay": "scd.assaylib.testing.exercise",
+    "meta_seed": 1,
+    "assay": "scd.churn.seed_global_rngs(scd.assaylib.testing.exercise)",
     "assay_kwargs": {"n": 4, "cmd": 'echo "!!!screendoor:result $((i * i))"'},
     "schedule": "* * * * *",
-    "how_launch": "scd.orchestrate.subprocess.launch()",
-    "how_poke": "scd.orchestrate.subprocess.poke()",
+    "how_launch": "scd.orch.subprocess.launch()",
+    "how_poke": "scd.orch.subprocess.poke()",
 }
 with tempfile.TemporaryDirectory() as workdir:
     run(

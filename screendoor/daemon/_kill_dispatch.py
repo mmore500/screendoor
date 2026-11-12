@@ -18,23 +18,22 @@ def kill_dispatch(workdir: str, dispatch_uuids: list | None = None) -> list:
             if ctx.closed or not wanted:
                 continue
             if not ctx.killed:  # pause first, so that no tick relaunches
-                ctx.write_dispatch(
+                ctx.write_dispatch_payload(
                     {
                         "event": "killed",
                     },
                 )
-            trials = ctx.hook("how_read_payload")(ctx) if ctx.is_setup else []
+            trials = ctx.read_trials() if ctx.is_setup else []
             trials = [t for t in trials if t["status"] in IN_PROGRESS]
             if trials:
                 ctx.hook("how_kill")(ctx, trials)
             for t in trials:
-                ctx.hook("how_write_payload")(
-                    ctx,
+                ctx.write_trial_submission(
                     {
                         "event": "killed",
                         "trial_uuid": t["trial_uuid"],
                         "attempt": t["attempt"],
-                        "job_id": t["job_id"],
+                        "job": t["job"],
                     },
                 )
             ctx.log(

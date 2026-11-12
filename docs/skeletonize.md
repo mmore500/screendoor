@@ -50,7 +50,7 @@ certificate (checked by `test_matches_2026_11_03_implementation` and
 | `require_atleast` | `[]` | Result list fields that must not drop below wildtype (e.g. `tasks`) |
 | `accept_fraction` | 1.0 | For `{"accept": bool}` results: fraction of replicates needed |
 | `on_trial_failure` | `"fail"` | `"fail"` the dispatch, or `"reject"` the genotype |
-| `search_seed` | derived from the dispatch seed | Seed of the search's own RNG |
+| `search_seed` | the dispatch's `meta_seed` | Seed of the search's own RNG |
 | `combination_rounds`, `final_audit`, `audit_every`, `max_rollbacks`, `max_proposal_batches`, `initial_knockout_size`, `exact` | as in `SearchConfig` | |
 
 Trials receive `$retained`, `$knockout` (site ranges such as `0-5,9`),

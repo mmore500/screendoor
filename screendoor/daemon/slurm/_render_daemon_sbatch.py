@@ -2,7 +2,7 @@ import hashlib
 import os
 import shlex
 
-from ...orchestrate.slurm._render_sbatch import render_preamble
+from ...orch.slurm._render_sbatch import render_preamble
 
 
 def chain_job_name(workdir: str) -> str:

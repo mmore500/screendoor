@@ -31,6 +31,7 @@ def make_dispatch(
     batch_size: int = 8,
     rel_tol: float = 0.02,
     search_seed: int | None = None,
+    meta_seed: int | None = None,
     binary: str | None = None,
     config_dir: str | None = None,
     schedule: str = "* * * * *",
@@ -72,22 +73,23 @@ def make_dispatch(
         "meta_treatment": "default",
         "meta_user": subprocess.check_output(["id", "-un"], text=True).strip(),
         "meta_attempt": subprocess.check_output(["date"], text=True).strip(),
-        "assay": f"scd.assaylib.skeletonize.{policy}",
+        "assay": "scd.churn.seed_global_rngs("
+        f"scd.assaylib.skeletonize.{policy})",
         "assay_kwargs": kwargs,
         "schedule": schedule,
         "trial_batchsize": trial_batchsize,
         "trial_batch_timeout": 600,
     }
+    if meta_seed is not None:  # else submit_dispatch draws one
+        d["meta_seed"] = meta_seed
     if orchestrator == "subprocess":
-        d["how_launch"] = "scd.orchestrate.subprocess.launch()"
-        d["how_poke"] = "scd.orchestrate.subprocess.poke()"
+        d["how_launch"] = "scd.orch.subprocess.launch()"
+        d["how_poke"] = "scd.orch.subprocess.poke()"
         d[
             "how_throttle"
-        ] = f"scd.orchestrate.subprocess.throttle(max_procs={max_procs})"
+        ] = f"scd.orch.subprocess.throttle(max_procs={max_procs})"
     elif orchestrator == "slurm":
-        d["how_launch"] = (
-            "scd.orchestrate.slurm.launch(" "sbatch_flags='--mem=1G')"
-        )
+        d["how_launch"] = "scd.orch.slurm.launch(" "sbatch_flags='--mem=1G')"
     return d
 
 
@@ -104,6 +106,7 @@ def main() -> int:
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--rel-tol", type=float, default=0.02)
     p.add_argument("--search-seed", type=int, default=None)
+    p.add_argument("--meta-seed", type=int, default=None)
     p.add_argument("--schedule", default="* * * * *")
     p.add_argument(
         "--orchestrator", default="subprocess", choices=["subprocess", "slurm"]
@@ -118,6 +121,7 @@ def main() -> int:
             batch_size=a.batch_size,
             rel_tol=a.rel_tol,
             search_seed=a.search_seed,
+            meta_seed=a.meta_seed,
             schedule=a.schedule,
             orchestrator=a.orchestrator,
             max_procs=a.max_procs,

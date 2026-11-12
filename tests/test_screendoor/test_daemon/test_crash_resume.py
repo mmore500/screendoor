@@ -1,5 +1,5 @@
 """Crash after every append in turn; resuming must reach the same result
-with no (trial, attempt) launched twice."""
+with no (trial, attempt) submitted twice."""
 
 import collections
 
@@ -31,17 +31,14 @@ ASSAYS = [
 
 
 def max_repeats(workdir):
-    """The most times any launch, and any first request, was recorded."""
+    """The most times any (trial, attempt) was submitted."""
     (ctx,) = load_dispatches(workdir)
-    events = ctx.hook("how_read_payload")(ctx, raw=True)
     counts = collections.Counter(
-        (e["event"], e["trial_uuid"], e["attempt"]) for e in events
+        (e["trial_uuid"], e["attempt"])
+        for e in ctx.read_trial_submissions()
+        if e["event"] == "requested"
     )
-    return max(
-        n
-        for (event, _, attempt), n in counts.items()
-        if event == "launched" or (event == "requested" and attempt == 0)
-    )
+    return max(counts.values())
 
 
 @pytest.mark.parametrize("assay,kwargs,fake_trial", ASSAYS)

@@ -1,35 +1,55 @@
 import hashlib
 
+from ..auxlib._batch_trials import batch_trials
 from ..auxlib._canonical_json import canonical_json
 
 
-def make_launch_id(entries: list) -> str:
-    """Hash of the (trial_uuid, attempt) pairs one launch call covers."""
+def job_name(ctx, entries: list) -> str:
+    """The job name for one launch: the dispatch and its trial attempts.
+
+    Deterministic, so the name recorded with each trial submission is the
+    name the orchestrator gives the job, and poke can find it.
+    """
     pairs = sorted((e["trial_uuid"], e["attempt"]) for e in entries)
-    return hashlib.sha256(canonical_json(pairs).encode()).hexdigest()[:16]
+    digest = hashlib.sha256(canonical_json(pairs).encode()).hexdigest()
+    return f"screendoor-{ctx.dispatch_uuid[:8]}-{digest[:12]}"
 
 
-def launch_entries(ctx, entries: list, launch_id: str) -> None:
-    """Call how_launch, then record ``launched`` for each trial.
+def submit_trials(ctx, entries: list) -> None:
+    """Record a ``requested`` submission per entry, then launch them.
 
-    First how_prep_payload makes room for every trial requested so far, as
-    storage that must be sized before its writers start needs.
+    Each entry has ``trial_uuid`` and ``attempt`` plus the fields its
+    submission records. The batches and job are fixed and recorded first,
+    as ``job: {"name", "index"}`` (index: the batch, or array task), so
+    that poke can tell from the records alone which job runs each trial.
+    A crash after recording and before launching leaves jobs that poke
+    finds missing, so they are relaunched.
+
+    how_prep_trial_payloads makes room for every trial before the launch,
+    as storage sized before its writers start needs.
     """
     if not entries:
         return
-    n_trials = len(ctx.hook("how_read_payload")(ctx))
-    ctx.hook("how_prep_payload")(ctx, n_trials)
-    launch = ctx.hook("how_launch")
-    for e in launch(ctx, entries, launch_id):
-        ctx.hook("how_write_payload")(
-            ctx,
-            {
-                "event": "launched",
-                "trial_uuid": e["trial_uuid"],
-                "attempt": e["attempt"],
-                "job_id": e["job_id"],
-                "launch_id": launch_id,
-            },
-        )
-    if hasattr(launch, "after_launched"):  # the inline launcher runs here
-        launch.after_launched(ctx, entries)
+    name = job_name(ctx, entries)
+    batches = batch_trials(entries, ctx.record["trial_batchsize"])
+    for index, batch in enumerate(batches):
+        for e in batch:
+            ctx.write_trial_submission(
+                {
+                    "event": "requested",
+                    **e,
+                    "job": {"name": name, "index": index},
+                }
+            )
+    ctx.hook("how_prep_trial_payloads")(ctx, len(ctx.read_trials()))
+    ctx.hook("how_launch")(
+        ctx,
+        name,
+        [
+            [
+                {"trial_uuid": e["trial_uuid"], "attempt": e["attempt"]}
+                for e in b
+            ]
+            for b in batches
+        ],
+    )

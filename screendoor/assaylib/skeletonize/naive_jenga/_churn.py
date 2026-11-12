@@ -1,9 +1,10 @@
-from .... import act
+from .... import churn as scd_churn
 from ....auxlib import canonical_json
 
 
-def churn(dispatch, trials, memo, *, rng):
+def churn(dispatch, trial_submissions, trial_payloads, memo):
     """Pull removable components one at a time, like Jenga blocks."""
+    trials = scd_churn.fold_trials(trial_submissions, trial_payloads)
     kw = dispatch["assay_kwargs"]
     s = (
         memo[-1]
@@ -15,7 +16,7 @@ def churn(dispatch, trials, memo, *, rng):
         : kw.get("width", 8)
     ]
     if not candidates:
-        return [act.succeed({"skeleton": s["kept"], "rounds": r})]
+        return [scd_churn.succeed({"skeleton": s["kept"], "rounds": r})]
 
     # keys are dicts, so look trials up by their canonical JSON
     by_key = {canonical_json(t["key"]): t for t in trials}
@@ -26,7 +27,7 @@ def churn(dispatch, trials, memo, *, rng):
     missing = [c for c, t in this_round.items() if t is None]
     if missing:
         return [
-            act.launch(
+            scd_churn.launch(
                 [
                     {
                         "key": {"round": r, "remove": c},
@@ -53,4 +54,4 @@ def churn(dispatch, trials, memo, *, rng):
         nxt = {**s, "kept": [k for k in s["kept"] if k != passing[0]]}
     else:
         nxt = {**s, "load_bearing": s["load_bearing"] + candidates}
-    return [act.memo({**nxt, "round": r + 1})]
+    return [scd_churn.memo({**nxt, "round": r + 1})]

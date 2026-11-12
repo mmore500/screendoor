@@ -4,6 +4,7 @@ import os
 import re
 
 from ._eval_hook import eval_hook, make_eval_namespace
+from ._fold_trial_events import fold_trial_events
 from ._now_iso import parse_iso
 
 # labels a dispatch carries, stamped on every record written for it
@@ -14,6 +15,10 @@ NAMES = (
     "meta_user",
     "meta_attempt",
 )
+
+# also stamped on every record, but an integer: seeds the churn decorator
+# scd.churn.seed_global_rngs; submit_dispatch draws one if absent
+SEED_NAME = "meta_seed"
 
 DEFAULTS = {
     **dict.fromkeys(NAMES, "default"),
@@ -26,24 +31,37 @@ DEFAULTS = {
 }
 
 LEVELS = ("progress", "eta", "success", "failure", "warning", "anomaly")
-FILES = ("payload", "memo", "notify", "telemetry")
+FILES = (
+    "trial_submissions",
+    "trial_payloads",
+    "trial_telemetry",
+    "memo",
+    "notify",
+)
 
 HOOK_DEFAULTS = {
-    "how_launch": "scd.orchestrate.slurm.launch()",
-    "how_poke": "scd.orchestrate.slurm.poke()",
-    "how_kill": "scd.orchestrate.slurm.kill()",
-    "how_throttle": "scd.orchestrate.null.throttle()",
-    "how_setup": "scd.record.jsonl.setup()",
+    "how_launch": "scd.orch.slurm.launch()",
+    "how_poke": "scd.orch.slurm.poke()",
+    "how_kill": "scd.orch.slurm.kill()",
+    "how_throttle": "lambda *args, **kwargs: True",
+    "how_setup": "scd.record.appendjsonl.setup()",
     **{f"how_notify_{lv}": "scd.notify.log.notify()" for lv in LEVELS},
-    **{f"how_read_{f}": f"scd.record.jsonl.read_{f}()" for f in FILES},
-    **{f"how_write_{f}": f"scd.record.jsonl.write_{f}()" for f in FILES},
-    "how_prep_payload": "scd.record.jsonl.prep_payload()",
+    **{f"how_read_{f}": f"scd.record.appendjsonl.read_{f}()" for f in FILES},
+    **{f"how_write_{f}": f"scd.record.appendjsonl.write_{f}()" for f in FILES},
+    "how_prep_trial_payloads": "scd.record.appendjsonl.prep_trial_payloads()",
+    "how_unblock_churn": "scd.unblock.all_trials_ready",
+    "how_cleanup_success": "lambda *args, **kwargs: ("
+    "scd.cleanup.tar(*args, **kwargs), scd.cleanup.clear(*args, **kwargs))",
+    "how_cleanup_failure": "lambda *args, **kwargs: None",
 }
 
 # the daemon's own hooks, which belong to no dispatch: set in screendoor.json
 WORKDIR_HOOK_DEFAULTS = {
-    "how_read_dispatch": "scd.record.jsonl.read_dispatch()",
-    "how_write_dispatch": "scd.record.jsonl.write_dispatch()",
+    **{
+        f"how_{op}_dispatch_{f}": f"scd.record.appendjsonl.{op}_dispatch_{f}()"
+        for op in ("read", "write")
+        for f in ("submissions", "payloads")
+    },
     "how_log_info": "logging.info",
     "how_notify_liveness": "scd.notify.null.notify()",
     "how_notify_termination": "scd.notify.log.notify()",
@@ -95,7 +113,6 @@ class DispatchContext:
         self.workdir = os.path.abspath(workdir)
         self.record = {**DEFAULTS, **record}
         self.dispatch_uuid = record["dispatch_uuid"]
-        self.seed = int(record["seed"])
         self.run_dir = os.path.join(
             self.workdir, run_dir_name(record, submitted_ts)
         )
@@ -104,6 +121,7 @@ class DispatchContext:
         self.labels = {
             "dispatch_uuid": self.dispatch_uuid,
             **{name: self.record[name] for name in NAMES},
+            SEED_NAME: self.record[SEED_NAME],
         }
         self._hooks: dict = {}
         # lifecycle, folded from the dispatch events
@@ -140,26 +158,53 @@ class DispatchContext:
     def trial_dir(self, trial_uuid: str) -> str:
         return os.path.join(self.run_dir, "trials", trial_uuid)
 
-    def write_dispatch(self, record: dict) -> dict:
-        """Append one of this dispatch's events to the dispatch records."""
+    def write_dispatch_payload(self, record: dict) -> dict:
+        """Record one thing the daemon did with this dispatch."""
         record = {**self.labels, **record}
-        return self.wdhooks.write_dispatch(self.workdir, record)
+        return self.wdhooks.write_dispatch_payloads(self.workdir, record)
+
+    def read_trial_submissions(self) -> list:
+        return self.hook("how_read_trial_submissions")(self)
+
+    def read_trial_payloads(self) -> list:
+        return self.hook("how_read_trial_payloads")(self)
+
+    def read_trial_events(self) -> list:
+        """Every trial event, submissions then payloads, unfolded."""
+        return self.read_trial_submissions() + self.read_trial_payloads()
+
+    def read_trials(self) -> list:
+        """One dict per trial, folded from submissions and payloads."""
+        return fold_trial_events(self.read_trial_events())
+
+    def write_trial_submission(self, record: dict) -> dict:
+        return self.hook("how_write_trial_submissions")(self, record)
+
+    def write_trial_payload(self, record: dict) -> dict:
+        return self.hook("how_write_trial_payloads")(self, record)
 
     def log(self, msg: str, *args) -> None:
         self.wdhooks.log_info(msg % args)
 
 
 def fold_dispatch_events(
-    workdir: str, events: list[dict], wdhooks: WorkdirHooks | None = None
+    workdir: str,
+    submissions: list[dict],
+    payloads: list[dict],
+    wdhooks: WorkdirHooks | None = None,
 ) -> list[DispatchContext]:
-    """Fold screendoor-dispatch.jsonl into one DispatchContext each."""
+    """Fold dispatch submissions and payloads into one DispatchContext each.
+
+    Each ``submitted`` submission makes a dispatch; the payloads (setup,
+    ticked, churn_error, killed, resumed, closed) give its state.
+    """
     ctxs: dict[str, DispatchContext] = {}
-    for ev in events:
+    for ev in submissions:
         if ev["event"] == "submitted" and ev["dispatch_uuid"] not in ctxs:
             ctxs[ev["dispatch_uuid"]] = DispatchContext(
                 workdir, ev["dispatch"], ev["ts"], wdhooks
             )
-    for ev in sorted(events, key=lambda e: parse_iso(e["ts"])):
+    for ev in sorted(payloads, key=lambda e: parse_iso(e["ts"])):
         ctx = ctxs.get(ev.get("dispatch_uuid"))
         if ctx is None:
             continue
@@ -183,5 +228,6 @@ def fold_dispatch_events(
 
 def load_dispatches(workdir: str) -> list[DispatchContext]:
     wdhooks = WorkdirHooks(workdir)
-    events = wdhooks.read_dispatch(wdhooks.workdir)
-    return fold_dispatch_events(workdir, events, wdhooks)
+    submissions = wdhooks.read_dispatch_submissions(wdhooks.workdir)
+    payloads = wdhooks.read_dispatch_payloads(wdhooks.workdir)
+    return fold_dispatch_events(workdir, submissions, payloads, wdhooks)

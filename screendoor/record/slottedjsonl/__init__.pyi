@@ -4,10 +4,10 @@ from ._encode_slot import encode_slot as encode_slot
 from ._extend import extend as extend
 from ._init import init as init
 from ._missing import missing as missing
-from ._prep_payload import prep_payload as prep_payload
+from ._prep_trial_payloads import prep_trial_payloads as prep_trial_payloads
 from ._read import read as read
-from ._read_payload import read_payload as read_payload
+from ._read_trial_payloads import read_trial_payloads as read_trial_payloads
 from ._slot import DEFAULT_SLOT as DEFAULT_SLOT
 from ._slot import SlotError as SlotError
 from ._write import write as write
-from ._write_payload import write_payload as write_payload
+from ._write_trial_payloads import write_trial_payloads as write_trial_payloads

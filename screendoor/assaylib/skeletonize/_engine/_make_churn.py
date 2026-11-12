@@ -6,9 +6,8 @@ all in. Churn launches the missing ones and returns. Nothing is memoized:
 the trial records are the state.
 """
 
-from .... import act
+from .... import churn as scd_churn
 from ....auxlib import canonical_json
-from ....rng._derive_seed import derive_seed
 from ._codec import encode_sites
 from ._search import ACCEPT, REJECT, Search
 
@@ -115,13 +114,13 @@ def _summary(kw, search, result, n, trials, waves) -> dict:
 
 
 def make_churn(policy: str):
-    def churn(dispatch, trials, memo, *, rng):
+    def churn(dispatch, trial_submissions, trial_payloads, memo):
+        trials = scd_churn.fold_trials(trial_submissions, trial_payloads)
         kw = dispatch["assay_kwargs"]
         n = len(kw["sequence"]) if "sequence" in kw else int(kw["n_sites"])
         reps = int(kw.get("replicates", 1))
-        seed = kw.get("search_seed")
-        if seed is None:
-            seed = derive_seed(dispatch["seed"], "skeletonize", policy)
+        # the search's own Random, replayed every tick: never the global one
+        seed = kw.get("search_seed", dispatch["meta_seed"])
         search = Search(
             range(n),
             policy=policy,
@@ -166,7 +165,7 @@ def make_churn(policy: str):
                     summary = _summary(
                         kw, search, stop.value, n, trials, waves
                     )
-                    return [act.succeed(summary)]
+                    return [scd_churn.succeed(summary)]
                 waves += 1
                 fresh = wave["fresh"]
                 # every wave also needs the fixed wildtype reference
@@ -193,9 +192,11 @@ def make_churn(policy: str):
                         f"{waiting + len(missing)} trials outstanding"
                     )
                     launch = (
-                        [act.launch(list(missing.values()))] if missing else []
+                        [scd_churn.launch(list(missing.values()))]
+                        if missing
+                        else []
                     )
-                    return [*launch, act.progress(n - kept, n, message)]
+                    return [*launch, scd_churn.progress(n - kept, n, message)]
                 baseline = results_of(wildtype, 0, required=True)
                 verdicts = {}
                 for g in wave["genotypes"]:
@@ -207,7 +208,7 @@ def make_churn(policy: str):
                     else:
                         verdicts[g] = _verdict(kw, results, baseline)
         except _Fail as e:
-            return [act.fail(str(e))]
+            return [scd_churn.fail(str(e))]
 
     churn.__doc__ = f"Skeletonize by knockout with the {policy!r} policy."
     return churn

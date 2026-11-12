@@ -1,14 +1,19 @@
 import logging
-import random
 import traceback
 
 from ..auxlib._DispatchContext import LEVELS
-from ..rng._step_seed import step_seed
-from ._apply_actions import apply_actions, close
-from ._launch_trials import launch_entries, make_launch_id
+from ..auxlib._fold_trial_events import fold_trial_events
+from ._apply_actions import apply_actions, churn_step, close
+from ._launch_trials import submit_trials
 from ._notify import flush_batched_notifications, notify
 
-IN_PROGRESS = ("launched", "running")
+# not yet settled, and not cancelled: poke checks these trials' jobs
+IN_PROGRESS = ("requested",)
+
+
+def _job_label(t: dict) -> str:
+    job = t["job"] or {}
+    return f"{job.get('name')}[{job.get('index')}]"
 
 
 def relaunch(ctx, gone: set) -> None:
@@ -18,20 +23,32 @@ def relaunch(ctx, gone: set) -> None:
     """
     if not gone:
         return
-    write = ctx.hook("how_write_payload")
     vanished = {  # re-read: a result may have landed since the poke
         t["trial_uuid"]: t
-        for t in ctx.hook("how_read_payload")(ctx)
+        for t in ctx.read_trials()
         if t["trial_uuid"] in gone and t["status"] in (*IN_PROGRESS, "killed")
     }
     entries = []
     for uid, t in vanished.items():
         free = t["status"] == "killed"
         if free or t["retries"] < ctx.record["trial_maxretry"]:
-            entries.append({"trial_uuid": uid, "attempt": t["attempt"] + 1})
+            ctx.log(
+                "screendoor: relaunching %s (job %s gone), attempt %d",
+                uid[:8],
+                _job_label(t),
+                t["attempt"] + 1,
+            )
+            entries.append(
+                {
+                    "trial_uuid": uid,
+                    "attempt": t["attempt"] + 1,
+                    "task_id": t["task_id"],
+                    "key": t["key"],
+                    "request": t["request"],
+                }
+            )
             continue
-        write(
-            ctx,
+        ctx.write_trial_payload(
             {
                 "event": "failed",
                 "trial_uuid": uid,
@@ -39,102 +56,50 @@ def relaunch(ctx, gone: set) -> None:
                 "kind": "lost",
                 "exit_code": None,
                 "channels": {},
-                "stderr_tail": f"job {t['job_id']} vanished "
+                "stderr_tail": f"job {_job_label(t)} vanished "
                 f"{t['retries'] + 1} times",
             },
         )
-    launch_id = make_launch_id(entries)
-    for e in entries:
-        t = vanished[e["trial_uuid"]]
-        ctx.log(
-            "screendoor: relaunching %s (job %s vanished), attempt %d",
-            t["trial_uuid"][:8],
-            t["job_id"],
-            e["attempt"],
-        )
-        write(
-            ctx,
-            {
-                "event": "requested",
-                **e,
-                "task_id": t["task_id"],
-                "key": t["key"],
-                "request": t["request"],
-                "launch_id": launch_id,
-            },
-        )
-    launch_entries(ctx, entries, launch_id)
-
-
-def reconcile(ctx) -> None:
-    """Requested but never launched: adopt the job if it exists, or launch."""
-    by_launch: dict = {}
-    for t in ctx.hook("how_read_payload")(ctx):
-        if t["status"] == "requested":
-            by_launch.setdefault(t["launch_id"], []).append(
-                {"trial_uuid": t["trial_uuid"], "attempt": t["attempt"]}
-            )
-    adopt = (
-        getattr(ctx.hook("how_launch"), "adopt", None) if by_launch else None
-    )
-    unlaunched = []
-    for launch_id, entries in by_launch.items():
-        jobs = adopt(ctx, launch_id, entries) if adopt and launch_id else {}
-        for e in entries:
-            job = jobs.get((e["trial_uuid"], e["attempt"]))
-            if job is None:
-                unlaunched.append(e)
-                continue
-            ctx.log(
-                "screendoor: adopting job %s for %s", job, e["trial_uuid"][:8]
-            )
-            ctx.hook("how_write_payload")(
-                ctx,
-                {
-                    "event": "launched",
-                    **e,
-                    "job_id": job,
-                    "launch_id": launch_id,
-                },
-            )
-    launch_entries(ctx, unlaunched, make_launch_id(unlaunched))
+    submit_trials(ctx, entries)
 
 
 def tick(ctx) -> None:
     """One daemon pass over one open dispatch."""
     if not ctx.is_setup:
         ctx.hook("how_setup")(ctx)
-    trials = ctx.hook("how_read_payload")(ctx)
+    trials = ctx.read_trials()
     in_progress = [t for t in trials if t["status"] in IN_PROGRESS]
     gone = ctx.hook("how_poke")(ctx, in_progress) if in_progress else ()
     killed = {t["trial_uuid"] for t in trials if t["status"] == "killed"}
     relaunch(ctx, set(gone) | killed)
-    reconcile(ctx)
     throttled = not ctx.hook("how_throttle")(ctx)
 
     streak = ctx.churn_error_streak
     while ctx.closed is None:
-        trials = ctx.hook("how_read_payload")(ctx)
+        submissions = ctx.read_trial_submissions()
+        payloads = ctx.read_trial_payloads()
+        if not ctx.hook("how_unblock_churn")(ctx, submissions, payloads):
+            break  # outstanding trials: churn waits for a later tick
+        trials = fold_trial_events(submissions + payloads)
         memo = ctx.hook("how_read_memo")(ctx)
-        seed = step_seed(ctx.seed, len(memo), len(trials))
         try:
-            actions = ctx.churn(
-                ctx.record, trials, memo, rng=random.Random(seed)
-            )
+            actions = ctx.churn(ctx.record, submissions, payloads, memo)
             if throttled:  # keep notifications and succeed / fail only
                 actions = [
                     a
                     for a in actions
                     if a.get("action") not in ("launch", "memo")
                 ]
-            wrote_memo = apply_actions(ctx, actions, trials, memo, seed)
+            wrote_memo = apply_actions(
+                ctx, actions, trials, memo, churn_step(memo, submissions)
+            )
         except Exception as e:
             streak += 1
             tb = traceback.format_exc()
             logging.error(
                 "screendoor: churn raised (%d in a row):\n%s", streak, tb
             )
-            ctx.write_dispatch(
+            ctx.write_dispatch_payload(
                 {
                     "event": "churn_error",
                     "streak": streak,
@@ -155,7 +120,7 @@ def tick(ctx) -> None:
             break
     flush_batched_notifications(ctx, LEVELS)
     ctx.churn_error_streak = streak
-    ctx.write_dispatch(
+    ctx.write_dispatch_payload(
         {
             "event": "ticked",
             "churn_error_streak": streak,

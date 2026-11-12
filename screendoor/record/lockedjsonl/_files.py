@@ -4,8 +4,13 @@ from ...auxlib._append_jsonl_line import SCHEMA, _after_append_hooks
 from ...auxlib._canonical_json import canonical_json
 from ...auxlib._now_iso import now_iso
 from ...auxlib._read_jsonl_tolerant import parse_jsonl_tolerant
-from ..jsonl._files import DISPATCH_FILE as DISPATCH_FILE
-from ..jsonl._files import path as path
+from ..appendjsonl._files import (
+    DISPATCH_PAYLOADS_FILE as DISPATCH_PAYLOADS_FILE,
+)
+from ..appendjsonl._files import (
+    DISPATCH_SUBMISSIONS_FILE as DISPATCH_SUBMISSIONS_FILE,
+)
+from ..appendjsonl._files import path as path
 from ._locked_open import locked_open
 
 

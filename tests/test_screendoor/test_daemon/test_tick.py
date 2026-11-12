@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from screendoor import act
+from screendoor import churn as scd_churn
 from screendoor.auxlib._DispatchContext import load_dispatches
 from screendoor.daemon import (
     kill_dispatch,
@@ -11,7 +11,6 @@ from screendoor.daemon import (
     run_tick_once,
     submit_dispatch,
 )
-from screendoor.rng import trial_seed
 from screendoor.testing import register_hook, simulate_dispatch
 
 EXERCISE = "scd.assaylib.testing.exercise"
@@ -23,8 +22,8 @@ def submit(workdir, assay, *, fake_trial=None, **settings):
     dispatch = {
         "assay": assay if isinstance(assay, str) else register_hook(assay),
         "schedule": "* * * * *",
-        "how_launch": f"scd.orchestrate.inline.launch(fake_trial={fake})",
-        "how_poke": "scd.orchestrate.inline.poke()",
+        "how_launch": f"scd.orch.inline.launch(fake_trial={fake})",
+        "how_poke": "scd.orch.inline.poke()",
         **settings,
     }
     return submit_dispatch(dispatch, workdir)
@@ -32,7 +31,7 @@ def submit(workdir, assay, *, fake_trial=None, **settings):
 
 def dispatch_events(workdir, event):
     (ctx,) = load_dispatches(workdir)
-    events = ctx.wdhooks.read_dispatch(workdir)
+    events = ctx.wdhooks.read_dispatch_payloads(workdir)
     return [e for e in events if e["event"] == event]
 
 
@@ -40,7 +39,8 @@ def test_submit_fills_uuid_and_seed(workdir, clock):
     uid = submit_dispatch({"assay": "x", "schedule": "*/5 * * * *"}, workdir)
     (ctx,) = load_dispatches(workdir)
     assert ctx.dispatch_uuid == uid
-    assert isinstance(ctx.record["seed"], int)
+    assert 0 <= ctx.record["meta_seed"] < 2**32
+    assert ctx.labels["meta_seed"] == ctx.record["meta_seed"]
     assert ctx.record["trial_maxretry"] == 3
 
 
@@ -90,8 +90,8 @@ def test_throttle_drops_launch_and_memo(workdir, clock):
 
 
 def test_relaunch_then_lost(workdir, clock):
-    def launch_nothing(ctx, entries, launch_id):
-        return [{**e, "job_id": "j"} for e in entries]
+    def launch_nothing(ctx, name, batches):
+        pass
 
     submit(
         workdir,
@@ -103,7 +103,7 @@ def test_relaunch_then_lost(workdir, clock):
     for _ in range(6):
         run_tick_once(workdir, force=True)
     (ctx,) = load_dispatches(workdir)
-    (t,) = ctx.hook("how_read_payload")(ctx)
+    (t,) = ctx.read_trials()
     assert t["status"] == "failed" and t["error"]["kind"] == "lost"
     assert t["attempt"] == 2
     assert ctx.closed["outcome"] == "failed"
@@ -112,8 +112,8 @@ def test_relaunch_then_lost(workdir, clock):
 def test_kill_pauses_and_resume_relaunches_for_free(workdir, clock):
     cancelled = []
 
-    def launch_nothing(ctx, entries, launch_id):
-        return [{**e, "job_id": f"j{e['attempt']}"} for e in entries]
+    def launch_nothing(ctx, name, batches):
+        pass
 
     uid = submit(
         workdir,
@@ -121,14 +121,14 @@ def test_kill_pauses_and_resume_relaunches_for_free(workdir, clock):
         assay_kwargs={"n": 1},
         trial_maxretry=0,
         how_launch=register_hook(launch_nothing),
-        how_poke=register_hook(lambda ctx, launched: set()),
+        how_poke=register_hook(lambda ctx, trials: set()),  # all running
         how_kill=register_hook(lambda ctx, trials: cancelled.extend(trials)),
     )
     run_tick_once(workdir)
     assert kill_dispatch(workdir) == [uid]
-    assert [t["job_id"] for t in cancelled] == ["j0"]
+    assert [(t["attempt"], t["job"]["index"]) for t in cancelled] == [(0, 0)]
     (ctx,) = load_dispatches(workdir)
-    (t,) = ctx.hook("how_read_payload")(ctx)
+    (t,) = ctx.read_trials()
     assert ctx.killed and ctx.closed is None  # paused, not failed
     assert (t["status"], t["kills"]) == ("killed", 1)
     assert run_tick_once(workdir, force=True) == []  # nothing active
@@ -141,16 +141,17 @@ def test_kill_pauses_and_resume_relaunches_for_free(workdir, clock):
     assert resume_dispatch(workdir) == [uid]
     run_tick_once(workdir, force=True)
     (ctx,) = load_dispatches(workdir)
-    (t,) = ctx.hook("how_read_payload")(ctx)
+    (t,) = ctx.read_trials()
     # relaunched although trial_maxretry is 0: a kill is not a retry
-    assert (t["status"], t["attempt"], t["job_id"]) == ("launched", 1, "j1")
+    assert (t["status"], t["attempt"]) == ("requested", 1)
+    assert t["job"]["name"] != cancelled[0]["job"]["name"]  # a new job
     assert row["tally"]["retries"] == 0
 
 
 def test_churn_errors_retry_then_fail(workdir, clock):
     calls = []
 
-    def churn(dispatch, trials, memo, *, rng):
+    def churn(dispatch, trial_submissions, trial_payloads, memo):
         calls.append(1)
         raise RuntimeError("boom")
 
@@ -169,11 +170,11 @@ def test_churn_errors_retry_then_fail(workdir, clock):
 def test_churn_error_streak_resets(workdir, clock):
     calls = []
 
-    def churn(dispatch, trials, memo, *, rng):
+    def churn(dispatch, trial_submissions, trial_payloads, memo):
         calls.append(1)
         if len(calls) in (1, 2, 4, 5):
             raise RuntimeError("flaky")
-        return [act.succeed({})] if len(calls) >= 6 else []
+        return [scd_churn.succeed({})] if len(calls) >= 6 else []
 
     submit(workdir, churn, churn_maxretry=2)
     for _ in range(7):
@@ -183,11 +184,11 @@ def test_churn_error_streak_resets(workdir, clock):
 
 
 def test_duplicate_requests_dropped(clock, caplog):
-    def churn(dispatch, trials, memo, *, rng):
-        again = act.launch([{"key": 1, "cmd": "x"}])
-        if trials:
-            return [again, act.succeed({})]
-        return [act.launch([{"key": 1, "cmd": "x"}] * 2)]
+    def churn(dispatch, trial_submissions, trial_payloads, memo):
+        again = scd_churn.launch([{"key": 1, "cmd": "x"}])
+        if trial_submissions:
+            return [again, scd_churn.succeed({})]
+        return [scd_churn.launch([{"key": 1, "cmd": "x"}] * 2)]
 
     r = simulate_dispatch(churn, fake_trial=lambda t: 0)
     assert len(r["trials"]) == 1
@@ -195,29 +196,28 @@ def test_duplicate_requests_dropped(clock, caplog):
 
 
 def test_memo_loop_same_tick(workdir, clock):
-    def churn(dispatch, trials, memo, *, rng):
+    def churn(dispatch, trial_submissions, trial_payloads, memo):
         if len(memo) < 3:
-            return [act.memo({"r": len(memo)})]
-        return [act.succeed({"memos": len(memo)})]
+            return [scd_churn.memo({"r": len(memo)})]
+        return [scd_churn.succeed({"memos": len(memo)})]
 
     simulate_dispatch(churn, workdir=workdir, max_ticks=1)
     (ctx,) = load_dispatches(workdir)
     assert ctx.closed["summary"] == {"memos": 3}
     memos = ctx.hook("how_read_memo")(ctx, raw=True)
-    # every step had its own random stream
-    assert len({m["step_seed"] for m in memos}) == 3
+    # each memo names the churn call that made it
+    assert [m["churn_step"] for m in memos] == ["0:0", "1:0", "2:0"]
 
 
-def test_trial_seed_and_env(clock):
+def test_trial_env(clock):
     cmd = (
         'echo "!!!screendoor:result '
-        '\\"$SCREENDOOR_SEED $i $(basename $SCREENDOOR_TRIAL_DIR)\\""'
+        '\\"${SCREENDOOR_SEED-unset} $i $(basename $SCREENDOOR_TRIAL_DIR)\\""'
     )
     r = simulate_dispatch(EXERCISE, {"n": 2, "cmd": cmd})
-    (ctx,) = load_dispatches(r["workdir"])
     for t in r["trials"]:
         seed, i, trial_dir = t["result"].split()
-        assert int(seed) == trial_seed(ctx.seed, t["trial_uuid"])
+        assert seed == "unset"  # trials get no seed unless churn sends one
         assert int(i) == t["key"]["i"]
         assert trial_dir == t["trial_uuid"]
 
@@ -245,12 +245,14 @@ def test_every_record_carries_the_dispatch_labels(tmp_path, clock):
     }
     files = {p.name: p for p in tmp_path.rglob("*.jsonl")}
     assert set(files) == {
-        "screendoor-dispatch.jsonl",
+        "dispatch_submissions.jsonl",
+        "dispatch_payloads.jsonl",
         "screendoor-notify.jsonl",  # the daemon's own, of no dispatch
-        "payload.jsonl",
+        "trial_submissions.jsonl",
+        "trial_payloads.jsonl",
         "memo.jsonl",
         "notify.jsonl",
-        "telemetry.jsonl",
+        "trial_telemetry.jsonl",
     }
     del files["screendoor-notify.jsonl"]
     for path in files.values():
@@ -306,6 +308,6 @@ def test_status_and_setup_records(workdir, clock, capsys):
     assert closed["tally"] == row["tally"]
     (setup,) = dispatch_events(workdir, "setup")
     launch = setup["hooks"]["how_launch"]
-    assert launch["expr"].startswith("scd.orchestrate.inline")
+    assert launch["expr"].startswith("scd.orch.inline")
     assert "python_version" in setup
     assert json.loads(json.dumps(setup)) == setup

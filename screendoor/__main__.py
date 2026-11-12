@@ -9,7 +9,7 @@ COMMANDS = {
     "screendoor.daemon.resume_dispatch": "resume killed dispatches",
     "screendoor.daemon.print_status": "show every dispatch in a workdir",
     "screendoor.daemon.replay_dispatch": "replay churn over a run dir",
-    "screendoor.worker": "run trials (launched for you)",
+    "screendoor.trial.worker": "run trials (launched for you)",
 }
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from screendoor.assaylib.skeletonize._engine._codec import (
     decode_sites,
     encode_sites,
 )
+from screendoor.auxlib._DispatchContext import load_dispatches
 from screendoor.testing import simulate_dispatch
 
 OLD = os.path.expanduser("~/2026-11-03")
@@ -64,14 +65,15 @@ def test_churn_is_pure_and_replayable(policy):
     r = _sim(policy, 16, pred, batch_size=4)
     d = {
         "assay_kwargs": {"n_sites": 16, "cmd": "x", "batch_size": 4},
-        "seed": 1,
+        "meta_seed": 1,
         "dispatch_uuid": r["dispatch_uuid"],
     }
     churn = getattr(skeletonize, policy).churn
-    trials = r["trials"]
-    a1 = churn(d, trials, [], rng=random.Random(1))
-    a2 = churn(d, list(reversed(trials)), [], rng=random.Random(2))
-    assert a1 == a2  # independent of rng and trial order
+    (ctx,) = load_dispatches(r["workdir"])
+    subs, pays = ctx.read_trial_submissions(), ctx.read_trial_payloads()
+    a1 = churn(d, subs, pays, [])
+    a2 = churn(d, subs[::-1], pays[::-1], [])
+    assert a1 == a2  # independent of record order
 
 
 def test_rel_tol_and_tasks_and_replicates():
@@ -141,12 +143,10 @@ def test_sequence_env_and_skeleton():
 def test_first_wave_launches_with_baseline():
     d = {
         "assay_kwargs": {"n_sites": 16, "cmd": "x", "batch_size": 8},
-        "seed": 5,
+        "meta_seed": 5,
         "dispatch_uuid": "00000000-0000-0000-0000-000000000000",
     }
-    (launch, progress) = skeletonize.hybrid.churn(
-        d, [], [], rng=random.Random(0)
-    )
+    (launch, progress) = skeletonize.hybrid.churn(d, [], [], [])
     keys = [t["key"] for t in launch["kwargs"]["trials"]]
     assert {"g": "0-15", "rep": 0} in keys  # wildtype reference
     assert len(keys) == 9

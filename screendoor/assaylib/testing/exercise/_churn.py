@@ -1,4 +1,4 @@
-from .... import act
+from .... import churn as scd_churn
 
 DEFAULT_CMD = (
     'echo \'!!!screendoor:telemetry {"hello": "world"}\'; '
@@ -6,13 +6,14 @@ DEFAULT_CMD = (
 )
 
 
-def churn(dispatch, trials, memo, *, rng):
+def churn(dispatch, trial_submissions, trial_payloads, memo):
     """Smoke test: launch n copies of cmd, wait, report what came back."""
+    trials = scd_churn.fold_trials(trial_submissions, trial_payloads)
     kw = dispatch["assay_kwargs"]
     n = kw.get("n", 1)
     if not trials:
         return [
-            act.launch(
+            scd_churn.launch(
                 [
                     {
                         "key": {"i": i},
@@ -25,12 +26,12 @@ def churn(dispatch, trials, memo, *, rng):
         ]
     done = [t for t in trials if t["state"] == "complete"]
     if len(done) < n:
-        return [act.progress(len(done), n)]
+        return [scd_churn.progress(len(done), n)]
     bad = sum(t["status"] != "succeeded" for t in trials)
     if bad:
-        return [act.fail(f"{bad}/{n} trials failed")]
+        return [scd_churn.fail(f"{bad}/{n} trials failed")]
     return [
-        act.succeed(
+        scd_churn.succeed(
             {
                 "outcomes": [
                     {

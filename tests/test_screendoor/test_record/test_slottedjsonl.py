@@ -149,9 +149,9 @@ def test_c14_slot_size_must_be_whole_pages(tmp_path):
 
 
 SLOTTED = {
-    "how_read_payload": "scd.record.slottedjsonl.read_payload()",
-    "how_write_payload": "scd.record.slottedjsonl.write_payload()",
-    "how_prep_payload": "scd.record.slottedjsonl.prep_payload()",
+    "how_read_trial_payloads": "scd.record.slottedjsonl.read_trial_payloads()",
+    "how_write_trial_payloads": "scd.record.slottedjsonl.write_trial_payloads()",
+    "how_prep_trial_payloads": "scd.record.slottedjsonl.prep_trial_payloads()",
 }
 
 
@@ -165,16 +165,18 @@ def test_trials_recorded_in_their_task_id_slots(tmp_path):
     assert r["closed"]["outcome"] == "succeeded"
     assert [t["task_id"] for t in r["trials"]] == [0, 1, 2, 3, 4]
     (ctx,) = load_dispatches(str(tmp_path))
-    slots = sj.read(os.path.join(ctx.run_dir, "payload.slots.jsonl"))
+    slots = sj.read(os.path.join(ctx.run_dir, "trial_payloads.slots.jsonl"))
     assert sorted(slots) == [0, 1, 2, 3, 4]  # line i is task i's result
     for t in r["trials"]:
-        slot_bytes = slots[t["task_id"]]
-        assert slot_bytes["event"] == "completed"
-        assert slot_bytes["trial_uuid"] == t["trial_uuid"]
-        assert slot_bytes["result"] == t["result"] == t["key"]["i"] ** 2
-        assert slot_bytes["dispatch_uuid"] == r["dispatch_uuid"]
-    appended = read_jsonl_tolerant(os.path.join(ctx.run_dir, "payload.jsonl"))
-    assert {e["event"] for e in appended} == {"requested", "launched"}
+        entry = slots[t["task_id"]]
+        assert entry["event"] == "completed"
+        assert entry["trial_uuid"] == t["trial_uuid"]
+        assert entry["result"] == t["result"] == t["key"]["i"] ** 2
+        assert entry["dispatch_uuid"] == r["dispatch_uuid"]
+    appended = read_jsonl_tolerant(
+        os.path.join(ctx.run_dir, "trial_payloads.jsonl")
+    )
+    assert appended == []  # every payload went to its slot
 
 
 def test_oversized_trial_record_falls_back_to_appending(tmp_path, caplog):
@@ -187,7 +189,7 @@ def test_oversized_trial_record_falls_back_to_appending(tmp_path, caplog):
         **SLOTTED,
     )
     assert r["trials"][0]["result"] == big
-    assert "goes to payload.jsonl" in caplog.text
+    assert "goes to trial_payloads.jsonl" in caplog.text
 
 
 def test_jsonl_records_take_no_slots(tmp_path):
@@ -205,17 +207,17 @@ def test_slot_size_set_once_in_prep_payload(tmp_path, caplog):
         {"n": 2},
         fake_trial=lambda t: big,
         workdir=str(tmp_path),
-        **{**SLOTTED, "how_prep_payload": SLOTTED_8K},
+        **{**SLOTTED, "how_prep_trial_payloads": SLOTTED_8K},
     )
     assert [t["result"] for t in r["trials"]] == [big, big]
-    assert "goes to payload.jsonl" not in caplog.text
+    assert "goes to trial_payloads.jsonl" not in caplog.text
     (ctx,) = load_dispatches(str(tmp_path))
-    path = os.path.join(ctx.run_dir, "payload.slots.jsonl")
+    path = os.path.join(ctx.run_dir, "trial_payloads.slots.jsonl")
     assert os.path.getsize(path) == 2 * 8192
     assert sorted(sj.read(path, None, 8192)) == [0, 1]
 
 
-SLOTTED_8K = "scd.record.slottedjsonl.prep_payload(slot_bytes=8192)"
+SLOTTED_8K = "scd.record.slottedjsonl.prep_trial_payloads(slot_bytes=8192)"
 
 
 def test_mismatched_slot_size_raises(tmp_path):
@@ -224,9 +226,10 @@ def test_mismatched_slot_size_raises(tmp_path):
         {"n": 1},
         fake_trial=lambda t: 1,
         workdir=str(tmp_path),
-        **{**SLOTTED, "how_prep_payload": SLOTTED_8K},
+        **{**SLOTTED, "how_prep_trial_payloads": SLOTTED_8K},
     )
     (ctx,) = load_dispatches(str(tmp_path))
     with pytest.raises(ValueError, match="8192-byte slots, not 4096"):
-        sj.read_payload(slot_bytes=4096)(ctx)
-    assert sj.read_payload(slot_bytes=8192)(ctx) == r["trials"]
+        sj.read_trial_payloads(slot_bytes=4096)(ctx)
+    (payload,) = sj.read_trial_payloads(slot_bytes=8192)(ctx)
+    assert payload["trial_uuid"] == r["trials"][0]["trial_uuid"]

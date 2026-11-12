@@ -11,7 +11,7 @@ def resume_dispatch(workdir: str, dispatch_uuids: list | None = None) -> list:
     for ctx in load_dispatches(workdir):
         wanted = not dispatch_uuids or ctx.dispatch_uuid in dispatch_uuids
         if ctx.killed and not ctx.closed and wanted:
-            ctx.write_dispatch(
+            ctx.write_dispatch_payload(
                 {
                     "event": "resumed",
                 },

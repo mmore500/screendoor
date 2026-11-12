@@ -14,11 +14,11 @@ def test_import_screendoor_is_lazy():
         check=True,
     ).stdout
     assert "screendoor.daemon" not in out
-    assert "screendoor.orchestrate" not in out
+    assert "screendoor.orch" not in out
 
 
 def test_attribute_chain():
-    assert callable(scd.orchestrate.slurm.launch)
+    assert callable(scd.orch.slurm.launch)
     assert callable(scd.assaylib.skeletonize.hybrid.churn)
     assert "hybrid" in dir(scd.assaylib.skeletonize)
     assert scd.auxlib.canonical_json({"b": 1, "a": 2}) == '{"a":2,"b":1}'

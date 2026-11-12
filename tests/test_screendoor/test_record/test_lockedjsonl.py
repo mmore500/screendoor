@@ -105,16 +105,24 @@ def test_concurrent_processes_keep_every_line_whole(tmp_path):
 LOCKED = {
     f"how_{op}_{f}": f"scd.record.lockedjsonl.{op}_{f}()"
     for op in ("read", "write")
-    for f in ("payload", "memo", "notify", "telemetry")
-} | {"how_prep_payload": "scd.record.lockedjsonl.prep_payload()"}
+    for f in (
+        "trial_submissions",
+        "trial_payloads",
+        "trial_telemetry",
+        "memo",
+        "notify",
+    )
+} | {"how_prep_trial_payloads": "scd.record.lockedjsonl.prep_trial_payloads()"}
 
 
 def test_dispatch_recorded_through_locked_hooks(tmp_path):
     with open(tmp_path / "screendoor.json", "w") as fh:
         json.dump(
             {
-                "how_read_dispatch": "scd.record.lockedjsonl.read_dispatch()",
-                "how_write_dispatch": "scd.record.lockedjsonl.write_dispatch()",
+                f"how_{op}_dispatch_{f}": f"scd.record.lockedjsonl."
+                f"{op}_dispatch_{f}()"
+                for op in ("read", "write")
+                for f in ("submissions", "payloads")
             },
             fh,
         )
@@ -131,7 +139,11 @@ def test_dispatch_recorded_through_locked_hooks(tmp_path):
     assert r["closed"]["outcome"] == "succeeded"
     assert [t["result"] for t in r["trials"]] == [1, 2, 3, 4]
     (ctx,) = load_dispatches(str(tmp_path))
-    assert ctx.hook_expr("how_write_payload") == LOCKED["how_write_payload"]
-    telemetry = ctx.hook("how_read_telemetry")(ctx)
-    assert {e["event"] for e in telemetry} == {"telemetry"}
-    assert sorted(e["value"] for e in telemetry) == [0, 1, 2, 3]
+    assert (
+        ctx.hook_expr("how_write_trial_payloads")
+        == LOCKED["how_write_trial_payloads"]
+    )
+    telemetry = ctx.hook("how_read_trial_telemetry")(ctx)
+    assert {e["event"] for e in telemetry} == {"started", "telemetry"}
+    values = [e["value"] for e in telemetry if e["event"] == "telemetry"]
+    assert sorted(values) == [0, 1, 2, 3]

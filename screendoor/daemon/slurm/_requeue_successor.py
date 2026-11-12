@@ -2,7 +2,7 @@ import datetime
 
 from ...auxlib._DispatchContext import load_dispatches
 from ...auxlib._now_iso import now
-from ...orchestrate.slurm import _run_slurm_command as _rsc
+from ...orch.slurm import _run_slurm_command as _rsc
 from .._run_tick_once import next_firing
 from ._render_daemon_sbatch import chain_job_name
 

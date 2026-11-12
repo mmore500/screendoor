@@ -1,4 +1,4 @@
-from ..auxlib._DispatchContext import NAMES, load_dispatches
+from ..auxlib._DispatchContext import NAMES, SEED_NAME, load_dispatches
 from ..auxlib._tally_trials import tally_trials
 from ._run_tick_once import next_firing
 
@@ -18,7 +18,7 @@ def print_status(workdir: str, *, file=None, max_failures: int = 3) -> list:
     """
     rows = []
     for ctx in load_dispatches(workdir):
-        trials = ctx.hook("how_read_payload")(ctx) if ctx.is_setup else []
+        trials = ctx.read_trials() if ctx.is_setup else []
         statuses = sorted({t["status"] for t in trials})
         failed = [t for t in trials if t["status"] == "failed"]
         row = {
@@ -56,7 +56,7 @@ def print_status(workdir: str, *, file=None, max_failures: int = 3) -> list:
             "    meta: "
             + ", ".join(
                 f"{name.removeprefix('meta_')}={ctx.record[name]}"
-                for name in NAMES
+                for name in (*NAMES, SEED_NAME)
             ),
             f"    trials: {counts or 'none'} ({tally})",
         ]

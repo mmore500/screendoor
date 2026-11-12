@@ -13,7 +13,7 @@ export PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}"
 mkdir -p "$WORKDIR"
 for org in $ORGANISMS; do
   for pol in $POLICIES; do
-    python3 "$HERE/make_dispatch.py" "$org" --policy "$pol" --search-seed 42 \
+    python3 "$HERE/make_dispatch.py" "$org" --policy "$pol" --search-seed 42 --meta-seed 1 \
       --max-procs 64 \
       | python3 -m screendoor.daemon.submit_dispatch - --workdir "$WORKDIR"
   done

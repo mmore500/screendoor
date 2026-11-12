@@ -13,7 +13,7 @@ import runpy
 import sys
 
 COMMANDS = {
-    "worker": "screendoor.worker",
+    "worker": "screendoor.trial.worker",
     "submit_dispatch": "screendoor.daemon.submit_dispatch",
     "run_tick_once": "screendoor.daemon.run_tick_once",
     "run_busyloop": "screendoor.daemon.run_busyloop",

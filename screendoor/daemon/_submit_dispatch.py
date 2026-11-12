@@ -1,16 +1,21 @@
 import json
+import secrets
 import uuid
 
-from ..auxlib._DispatchContext import HOOK_DEFAULTS, NAMES, WorkdirHooks
+from ..auxlib._DispatchContext import (
+    HOOK_DEFAULTS,
+    NAMES,
+    SEED_NAME,
+    WorkdirHooks,
+)
 from ..auxlib._next_cron_firing import parse_cron
-from ..rng._derive_seed import derive_seed
 
 SETTINGS = {
     *NAMES,
+    SEED_NAME,
     "assay",
     "assay_kwargs",
     "schedule",
-    "seed",
     "trial_batchsize",
     "trial_batch_timeout",
     "trial_maxretry",
@@ -35,6 +40,9 @@ def validate_dispatch(obj: dict) -> None:
     for key in NAMES:
         if not isinstance(obj.get(key, ""), str):
             raise ValueError(f"{key} must be a string")
+    seed = obj.get(SEED_NAME, 0)
+    if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
+        raise ValueError(f"{SEED_NAME} must be a non-negative integer")
     if not isinstance(obj.get("assay_kwargs", {}), dict):
         raise ValueError("assay_kwargs must be an object")
     for key, least in (
@@ -50,22 +58,22 @@ def validate_dispatch(obj: dict) -> None:
 def submit_dispatch(obj: dict, workdir: str) -> str:
     """Record a new dispatch; return its dispatch_uuid.
 
-    Fills in ``dispatch_uuid``, ``seed`` and, as ``"default"``, any absent
-    ``meta_*`` label.
+    Fills in ``dispatch_uuid``, ``meta_seed`` (32 random bits from the
+    operating system) and, as ``"default"``, any absent ``meta_*`` label.
     """
     obj = json.loads(json.dumps(obj))  # a deep copy that must be JSON
     validate_dispatch(obj)
     obj.setdefault("dispatch_uuid", str(uuid.uuid4()))
     for key in NAMES:
         obj.setdefault(key, "default")
-    obj.setdefault("seed", derive_seed("dispatch", obj["dispatch_uuid"]))
+    obj.setdefault(SEED_NAME, secrets.randbits(32))
     wdhooks = WorkdirHooks(workdir)
-    wdhooks.write_dispatch(
+    wdhooks.write_dispatch_submissions(
         wdhooks.workdir,
         {
             "event": "submitted",
             "dispatch_uuid": obj["dispatch_uuid"],
-            **{key: obj[key] for key in NAMES},
+            **{key: obj[key] for key in (*NAMES, SEED_NAME)},
             "dispatch": obj,
         },
     )

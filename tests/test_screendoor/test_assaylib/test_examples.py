@@ -7,17 +7,29 @@ from screendoor.testing import simulate_dispatch
 RNG = random.Random(0)
 
 
+TS = "2026-11-11T00:00:00+00:00"
+
+
 def trial(key, status="succeeded", result=None):
-    return {
-        "trial_uuid": str(key),
-        "key": key,
-        "status": status,
-        "state": "pending" if status == "running" else "complete",
-        "result": result,
-        "channels": {},
-        "error": None,
-        "attempt": 0,
-    }
+    """One trial's raw records: its submission and, unless still running,
+    its payload."""
+    base = {"trial_uuid": str(key), "attempt": 0, "ts": TS}
+    sub = {**base, "event": "requested", "key": key, "request": {}}
+    if status == "running":
+        return [sub], []
+    if status == "succeeded":
+        pay = {**base, "event": "completed", "result": result, "channels": {}}
+    else:
+        pay = {**base, "event": "failed", "kind": "error", "channels": {}}
+    return [sub], [pay]
+
+
+def records(*trials):
+    """``(trial_submissions, trial_payloads)`` for churn."""
+    return (
+        [e for subs, _ in trials for e in subs],
+        [e for _, pays in trials for e in pays],
+    )
 
 
 def kinds(actions):
@@ -26,7 +38,7 @@ def kinds(actions):
 
 def test_naive_exhaustive_pure():
     d = {"assay_kwargs": {"targets": ["a", "b"], "threshold": 0.1, "cmd": "x"}}
-    launch, progress = ko_churn(d, [], [], rng=RNG)
+    launch, progress = ko_churn(d, [], [], [])
     assert kinds([launch, progress]) == ["launch", "progress"]
     assert len(launch["kwargs"]["trials"]) == 3
     trials = [
@@ -34,9 +46,9 @@ def test_naive_exhaustive_pure():
         trial({"knockout": "a"}, result={"score": 0.5}),
         trial({"knockout": "b"}, "running"),
     ]
-    assert kinds(ko_churn(d, trials, [], rng=RNG)) == ["progress"]
+    assert kinds(ko_churn(d, *records(*trials), [])) == ["progress"]
     trials[2] = trial({"knockout": "b"}, result={"score": 0.95})
-    (a,) = ko_churn(d, trials, [], rng=RNG)
+    (a,) = ko_churn(d, *records(*trials), [])
     assert a["action"] == "succeed"
     assert a["kwargs"]["summary"]["hits"] == ["a"]
 
@@ -47,7 +59,7 @@ def test_naive_exhaustive_baseline_fail():
         trial({"knockout": None}, "failed"),
         trial({"knockout": "a"}, result={"score": 1}),
     ]
-    assert kinds(ko_churn(d, trials, [], rng=RNG)) == ["fail"]
+    assert kinds(ko_churn(d, *records(*trials), [])) == ["fail"]
 
 
 def test_null_results_count_as_failed():
@@ -56,9 +68,9 @@ def test_null_results_count_as_failed():
         trial({"knockout": None}, result={"score": 1.0}),
         trial({"knockout": "a"}),  # succeeded, but sent no result
     ]
-    assert kinds(ko_churn(d, trials, [], rng=RNG)) == ["fail"]
+    assert kinds(ko_churn(d, *records(*trials), [])) == ["fail"]
     d["assay_kwargs"]["max_failed"] = 1
-    (a,) = ko_churn(d, trials, [], rng=RNG)
+    (a,) = ko_churn(d, *records(*trials), [])
     assert a["kwargs"]["summary"] == {
         "baseline": 1.0,
         "hits": [],
@@ -91,4 +103,4 @@ def test_exercise_runs_real_scripts():
 def test_exercise_pure_failure():
     d = {"assay_kwargs": {"n": 2}}
     trials = [trial({"i": 0}), trial({"i": 1}, "failed")]
-    assert kinds(ex_churn(d, trials, [], rng=RNG)) == ["fail"]
+    assert kinds(ex_churn(d, *records(*trials), [])) == ["fail"]

@@ -1,17 +1,20 @@
 import os
-import random
 
 from ..auxlib._DispatchContext import load_dispatches
 from ..auxlib._canonical_json import canonical_json
 from ..auxlib._fold_trial_events import fold_trial_events
 from ..auxlib._make_trial_uuid import make_trial_uuid
-from ..rng._step_seed import step_seed
+from ._apply_actions import churn_step
 
 
 def replay_dispatch(
     run_dir: str, *, assay: str | None = None, file=None
 ) -> list:
-    """Re-run churn at every recorded step with the recorded seeds.
+    """Re-run churn at every recorded step, from the state it saw then.
+
+    A step is the churn call that made some trial submissions or memos;
+    each records its ``churn_step``. Churn is pure, or seeds itself from
+    that state with scd.churn.seed_global_rngs, so a replay should match.
 
     With ``assay``, replay that assay expression instead of the recorded
     one. Prints a line per step and returns the per-step reports.
@@ -23,15 +26,16 @@ def replay_dispatch(
         raise LookupError(f"no dispatch with run dir {run_dir}")
     if assay is not None:
         ctx.record = {**ctx.record, "assay": assay}
-    trial_events = ctx.hook("how_read_payload")(ctx, raw=True)
+    submissions = ctx.read_trial_submissions()
+    payloads = ctx.read_trial_payloads()
     memo_events = ctx.hook("how_read_memo")(ctx, raw=True)
 
-    steps: dict = {}  # step seed -> what that churn call recorded
-    for e in trial_events + memo_events:
-        if "step_seed" not in e:
-            continue  # only first requests and memos carry one
+    steps: dict = {}  # churn step -> what that churn call recorded
+    for e in submissions + memo_events:
+        if "churn_step" not in e:
+            continue
         step = steps.setdefault(
-            e["step_seed"], {"ts": e["ts"], "keys": [], "memo": []}
+            e["churn_step"], {"ts": e["ts"], "keys": [], "memo": []}
         )
         step["ts"] = min(step["ts"], e["ts"])
         if e["event"] == "memo":
@@ -40,14 +44,12 @@ def replay_dispatch(
             step["keys"].append(e["key"])
 
     reports = []
-    for seed, step in sorted(steps.items(), key=lambda kv: kv[1]["ts"]):
-        before = [e for e in trial_events if e["ts"] < step["ts"]]
-        trials = fold_trial_events(before)
+    for key, step in sorted(steps.items(), key=lambda kv: kv[1]["ts"]):
+        subs = [e for e in submissions if e["ts"] < step["ts"]]
+        pays = [e for e in payloads if e["ts"] < step["ts"]]
+        trials = fold_trial_events(subs + pays)
         memo = [e["data"] for e in memo_events if e["ts"] < step["ts"]]
-        expected_seed = step_seed(ctx.seed, len(memo), len(trials))
-        actions = ctx.churn(
-            ctx.record, trials, memo, rng=random.Random(expected_seed)
-        )
+        actions = ctx.churn(ctx.record, subs, pays, memo)
         known = {t["trial_uuid"] for t in trials}
         keys = [
             t["key"]
@@ -58,7 +60,7 @@ def replay_dispatch(
         ]
         memos = [a["kwargs"]["data"] for a in actions if a["action"] == "memo"]
         match = (
-            str(expected_seed) == seed
+            churn_step(memo, subs) == key
             and sorted(map(canonical_json, keys))
             == sorted(map(canonical_json, step["keys"]))
             and memos == step["memo"]
@@ -66,7 +68,7 @@ def replay_dispatch(
         reports.append(
             {
                 "ts": step["ts"],
-                "step_seed": seed,
+                "churn_step": key,
                 "match": match,
                 "recorded_launches": len(step["keys"]),
                 "replayed_launches": len(keys),

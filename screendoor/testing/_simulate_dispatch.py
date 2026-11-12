@@ -23,7 +23,7 @@ def simulate_dispatch(
 
     ``assay`` is an expression or a churn function. ``fake_trial(trial) ->
     result`` stands in for each trial's script (``trial`` has key, env,
-    cmd, seed and attempt); raising fails the trial with kind ``error``.
+    cmd and attempt); raising fails the trial with kind ``error``.
     Without it, the scripts really run. Other ``settings`` go into the
     dispatch.
 
@@ -42,14 +42,14 @@ def simulate_dispatch(
             if not isinstance(assay, str):
                 assay = register_hook(assay)
             fake = register_hook(fake_trial)
-            launch = f"scd.orchestrate.inline.launch(fake_trial={fake})"
+            launch = f"scd.orch.inline.launch(fake_trial={fake})"
             dispatch = {
                 "assay": assay,
                 "assay_kwargs": assay_kwargs or {},
                 "schedule": "* * * * *",
                 "how_launch": launch,
-                "how_poke": "scd.orchestrate.inline.poke()",
-                "how_kill": "scd.orchestrate.inline.kill()",
+                "how_poke": "scd.orch.inline.poke()",
+                "how_kill": "scd.orch.inline.kill()",
                 "how_notify_progress": "scd.notify.null.notify()",
                 **settings,
             }
@@ -64,8 +64,6 @@ def simulate_dispatch(
             "workdir": workdir,
             "dispatch_uuid": ctx.dispatch_uuid,
             "closed": ctx.closed,
-            "trials": ctx.hook("how_read_payload")(ctx)
-            if ctx.is_setup
-            else [],
+            "trials": ctx.read_trials() if ctx.is_setup else [],
             "memo": ctx.hook("how_read_memo")(ctx) if ctx.is_setup else [],
         }

@@ -1,9 +1,11 @@
-from . import act as act
 from . import assaylib as assaylib
 from . import auxlib as auxlib
+from . import churn as churn
+from . import cleanup as cleanup
 from . import daemon as daemon
 from . import notify as notify
-from . import orchestrate as orchestrate
+from . import orch as orch
 from . import record as record
-from . import rng as rng
 from . import testing as testing
+from . import trial as trial
+from . import unblock as unblock
