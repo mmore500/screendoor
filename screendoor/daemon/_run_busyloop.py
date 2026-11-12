@@ -12,6 +12,13 @@ def run_busyloop(dispatchdir: str, *, max_ticks: int | None = None) -> None:
 
     Tells how_notify_termination why the daemon stopped, unless it was
     killed outright or reached ``max_ticks``.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The dispatchdir to tick.
+    max_ticks : int or None, default None
+        Return after this many passes; None for no limit.
     """
     try:
         _loop(dispatchdir, max_ticks)

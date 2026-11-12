@@ -1,3 +1,5 @@
+import typing
+
 from .._knockout import ACCEPT, KnockoutSearch, search_churn, split
 
 
@@ -8,16 +10,46 @@ class DdminSearch(KnockoutSearch):
 
     policy = "ddmin"
 
-    def search(self):
-        """Generator: parallel partition-union delta debugging."""
+    def search(self) -> typing.Generator[dict, dict, str]:
+        """Generator: parallel partition-union delta debugging.
+
+        Returns
+        -------
+        Generator[dict, dict, str]
+            Yields genotype batches, is sent their verdicts, and returns
+            the search's status.
+        """
         return (
             yield from self.partition_union(self.initial_chunks(), "ddmin")
         )
 
-    def partition_union(self, k: int, kind: str, *, pivot=None):
+    def partition_union(
+        self,
+        k: int,
+        kind: str,
+        *,
+        pivot: typing.Callable[[], typing.Generator[dict, dict, str]]
+        | None = None,
+    ) -> typing.Generator[dict, dict, str]:
         """Generator: parallel partition-union delta debugging, starting
         from ``k`` chunks. With ``pivot`` (a generator function), hand
-        over to it once chunks stop passing."""
+        over to it once chunks stop passing.
+
+        Parameters
+        ----------
+        k : int
+            How many chunks to start from.
+        kind : str
+            The phase, recorded as the reason for each commit.
+        pivot : Callable[[], Generator] or None, default None
+            The search to hand over to.
+
+        Returns
+        -------
+        Generator[dict, dict, str]
+            Yields genotype batches, is sent their verdicts, and returns
+            the search's status.
+        """
         while len(self.current) >= 2 and k < len(self.current):
             small = self.exact and k >= 8 and len(self.current) <= 2 * self.b
             if pivot and small:
@@ -54,8 +86,32 @@ class DdminSearch(KnockoutSearch):
         return "pass"
 
 
-def churn(dispatch, trial_submissions, trial_payloads, memo):
-    """Skeletonize by parallel partition-union delta debugging. See docs/skeletonization.md."""
+def churn(
+    dispatch: dict,
+    trial_submissions: list[dict],
+    trial_payloads: list[dict],
+    memo: list[dict],
+) -> list[dict]:
+    """Skeletonize by parallel partition-union delta debugging.
+
+    See docs/skeletonization.md.
+
+    Parameters
+    ----------
+    dispatch : dict
+        The dispatch record, with ``assay_kwargs``.
+    trial_submissions : list of dict
+        The dispatch's trial submissions.
+    trial_payloads : list of dict
+        The dispatch's trial payloads.
+    memo : list of dict
+        Unused: the search is replayed from the trials.
+
+    Returns
+    -------
+    list of dict
+        This step's actions.
+    """
     return search_churn(
         DdminSearch, dispatch, trial_submissions, trial_payloads
     )

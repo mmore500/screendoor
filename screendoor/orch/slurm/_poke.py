@@ -1,15 +1,24 @@
+from __future__ import annotations
+
 import logging
+import typing
 
 from . import _run_slurm_command as _rsc
 
 
-def poke():
+def poke() -> typing.Callable[[dict, list[dict]], set[str]]:
     """One squeue call per tick: trials whose array task is not queued.
 
     sacct is asked how the gone jobs ended, for the log only.
+
+    Returns
+    -------
+    Callable[[dict, list], set]
+        The ``how_poke`` hook: ``(ctx, trials)`` returns the uuids of the
+        trials whose array task is not queued; none if ``squeue`` fails.
     """
 
-    def poke(ctx, trials: list) -> set:
+    def poke(ctx: dict, trials: list[dict]) -> set[str]:
         try:
             queued = _rsc.queued_jobs()
         except RuntimeError as e:
@@ -18,7 +27,7 @@ def poke():
             )
             return set()
 
-        def gone(t) -> bool:
+        def gone(t: dict) -> bool:
             job = t["job"]
             return not job or (job["name"], job["index"]) not in queued
 
@@ -38,7 +47,7 @@ def poke():
                     ]
                 )
                 for line in out.splitlines():
-                    ctx.log("screendoor: job left queue: %s", line)
+                    logging.info("screendoor: job left queue: %s", line)
         except RuntimeError as e:
             logging.warning("screendoor: sacct failed: %s", e)
         return {t["trial_uuid"] for t in trials}

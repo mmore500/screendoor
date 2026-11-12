@@ -1,6 +1,7 @@
 import contextlib
 import os
 import tempfile
+import typing
 
 from ..auxlib._DispatchContext import load_dispatches
 from ..daemon._run_busyloop import run_busyloop
@@ -11,15 +12,15 @@ from ._register_hook import register_hook
 
 
 def simulate_dispatch(
-    assay,
+    assay: str | typing.Callable[..., list[dict]],
     assay_kwargs: dict | None = None,
     *,
-    fake_trial=None,
+    fake_trial: typing.Callable[[dict], typing.Any] | None = None,
     clock: FakeClock | None = None,
     dispatchdir: str | None = None,
     max_ticks: int = 100000,
     submit: bool = True,
-    **settings,
+    **settings: typing.Any,
 ) -> dict:
     """Run a whole dispatch on the inline orchestrator in fake time.
 
@@ -33,7 +34,30 @@ def simulate_dispatch(
     To resume an existing ``dispatchdir``, pass ``submit=False`` and, if it
     holds several dispatches, ``dispatch_uuid``.
 
-    Returns ``{"dispatchdir", "dispatch_uuid", "completed", "trials", "memo"}``.
+    Parameters
+    ----------
+    assay : str or Callable
+        The dispatch's ``assay``: an expression or a churn function.
+    assay_kwargs : dict or None, default None
+        The dispatch's ``assay_kwargs``.
+    fake_trial : Callable[[dict], Any] or None, default None
+        Stands in for each trial's script, returning its result.
+    clock : FakeClock or None, default None
+        The clock to run in, entered here unless already entered; a new
+        one if None.
+    dispatchdir : str or None, default None
+        The dispatchdir; a fresh temporary directory if None.
+    max_ticks : int, default 100000
+        Stop the daemon after this many passes.
+    submit : bool, default True
+        Whether to submit a new dispatch, rather than resume one.
+    **settings
+        Further dispatch fields, set over INLINE_HOOKS.
+
+    Returns
+    -------
+    dict
+        ``{"dispatchdir", "dispatch_uuid", "completed", "trials", "memo"}``.
     """
     clock = clock or FakeClock()
     dispatchdir = dispatchdir or tempfile.mkdtemp(prefix="screendoor-sim-")

@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import logging
 import traceback
+import typing
 
 from ..auxlib._fold_trial_events import fold_trial_events
 from ._apply_actions import apply_actions, check_actions, churn_step, complete
@@ -7,15 +10,25 @@ from ._notify import flush_batched_notifications, notify
 from ._setup_dispatch import setup_dispatch
 from ._submit_trials import submit_trials
 
+if typing.TYPE_CHECKING:
+    from ..auxlib._DispatchContext import DispatchContext
+
 
 def _job_label(t: dict) -> str:
     return f"{t['job']['name']}[{t['job']['index']}]"
 
 
-def relaunch(ctx, gone: set) -> None:
+def relaunch(ctx: DispatchContext, gone: set[str]) -> None:
     """Request vanished trials again, or record them ``failed`` (lost).
 
     A killed attempt does not count against ``trial_maxretry``.
+
+    Parameters
+    ----------
+    ctx : DispatchContext
+        The dispatch ticking.
+    gone : set of str
+        The trial_uuids whose jobs are gone or were killed.
     """
     if not gone:
         return
@@ -62,7 +75,9 @@ def relaunch(ctx, gone: set) -> None:
     submit_trials(ctx, entries, len(trials))
 
 
-def _record_churn_error(ctx, streak: int, e: Exception) -> None:
+def _record_churn_error(
+    ctx: DispatchContext, streak: int, e: Exception
+) -> None:
     tb = traceback.format_exc()
     logging.error("screendoor: churn raised (%d in a row):\n%s", streak, tb)
     ctx.write_dispatch_telemetry(
@@ -82,22 +97,28 @@ def _record_churn_error(ctx, streak: int, e: Exception) -> None:
         notify(ctx, "failure", "dispatch failed: churn keeps raising")
 
 
-def tick(ctx) -> None:
-    """One daemon pass over one open dispatch."""
+def tick(ctx: DispatchContext) -> None:
+    """One daemon pass over one open dispatch.
+
+    Parameters
+    ----------
+    ctx : DispatchContext
+        The dispatch to tick.
+    """
     if not ctx.is_setup:
         setup_dispatch(ctx)
     trials = ctx.read_trials()
     in_progress = [t for t in trials if t["status"] == "requested"]
-    gone = ctx.hook("how_poke")(ctx, in_progress) if in_progress else ()
+    gone = ctx.call_hook("how_poke", in_progress) if in_progress else ()
     killed = {t["trial_uuid"] for t in trials if t["status"] == "killed"}
     relaunch(ctx, set(gone) | killed)
-    throttled = not ctx.hook("how_throttle_churn")(ctx)
+    throttled = not ctx.call_hook("how_throttle_churn")
 
     streak = ctx.churn_error_streak
     while ctx.completed is None:
         submissions = ctx.read_trial_submissions()
         payloads = ctx.read_trial_payloads()
-        if not ctx.hook("how_unblock_churn")(ctx, submissions, payloads):
+        if not ctx.call_hook("how_unblock_churn", submissions, payloads):
             break  # outstanding trials: churn waits for a later tick
         memo = ctx.read_churn_memo()
         try:  # only churn's own errors count against churn_maxretry

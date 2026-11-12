@@ -20,6 +20,29 @@ def write(
     SlotError: a writer never extends the file. With ``clear_first``, the
     slot is blanked and synced first, so that a crash while overwriting
     leaves padding, not a mix of two records.
+
+    Parameters
+    ----------
+    path : str
+        The slotted file.
+    i : int
+        The slot's index.
+    record : dict
+        The record to write.
+    slot_bytes : int or None, default None
+        The slot size; None takes the file's own.
+    wait : float, default 120.0
+        Seconds to wait for the slot to exist.
+    clear_first : bool, default False
+        Blank and sync the slot before writing it.
+
+    Raises
+    ------
+    SlotError
+        If the slot does not exist after ``wait`` seconds, ``record`` does
+        not fit it, or a write is short.
+    ValueError
+        If ``i`` is negative.
     """
     slot_bytes = resolve_slot(path, slot_bytes)
     if i < 0:

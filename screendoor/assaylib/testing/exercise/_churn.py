@@ -6,10 +6,32 @@ DEFAULT_CMD = (
 )
 
 
-def churn(dispatch, trial_submissions, trial_payloads, memo):
+def churn(
+    dispatch: dict,
+    trial_submissions: list[dict],
+    trial_payloads: list[dict],
+    memo: list[dict],
+) -> list[dict]:
     """Smoke test: launch ``n`` (default 1) copies of ``cmd``, each with
     ``$i`` and ``env``, and succeed with what they sent; raises if any
-    trial has no result."""
+    trial has no result.
+
+    Parameters
+    ----------
+    dispatch : dict
+        The dispatch record, with ``assay_kwargs``.
+    trial_submissions : list of dict
+        The dispatch's trial submissions.
+    trial_payloads : list of dict
+        The dispatch's trial payloads.
+    memo : list of dict
+        Unused.
+
+    Returns
+    -------
+    list of dict
+        This step's actions.
+    """
     trials = scd_churn.fold_trials(trial_submissions, trial_payloads)
     kw = dispatch["assay_kwargs"]
     n = kw.get("n", 1)

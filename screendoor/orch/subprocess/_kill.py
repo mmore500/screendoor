@@ -1,14 +1,24 @@
+from __future__ import annotations
+
 import contextlib
 import os
 import signal
+import typing
 
 from ._procs import live_pid, pidfile
 
 
-def kill():
-    """Send SIGTERM to the process group of each trial's batch."""
+def kill() -> typing.Callable[[dict, list[dict]], None]:
+    """Send SIGTERM to the process group of each trial's batch.
 
-    def kill(ctx, trials: list) -> None:
+    Returns
+    -------
+    Callable[[dict, list], None]
+        The ``how_kill`` hook: ``(ctx, trials)`` signals each running
+        batch the trials belong to.
+    """
+
+    def kill(ctx: dict, trials: list[dict]) -> None:
         paths = {pidfile(ctx, t["job"]) for t in trials if t["job"]}
         for path in sorted(paths):
             pid = live_pid(path)

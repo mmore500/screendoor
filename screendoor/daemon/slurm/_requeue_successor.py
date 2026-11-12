@@ -8,8 +8,19 @@ from .._next_firing import next_firing
 from ._render_daemon_sbatch import chain_job_name
 
 
-def queued_chain_jobs(dispatchdir: str) -> list:
-    """Pending daemon jobs, as ``(jobid, start time)`` string pairs."""
+def queued_chain_jobs(dispatchdir: str) -> list[tuple[str, str]]:
+    """Pending daemon jobs, as ``(jobid, start time)`` string pairs.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The daemon's dispatchdir.
+
+    Returns
+    -------
+    list of tuple of (str, str)
+        One per pending job, as squeue prints them.
+    """
     out = _rsc.run(
         [
             "squeue",
@@ -31,6 +42,18 @@ def earliest_begin(
     With ``successor``, a dispatch due now counts at its following cron
     firing instead: the daemon job queueing the successor is about to tick
     it, so the successor's ``--begin`` is when it is next due after that.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The dispatchdir holding the dispatches.
+    successor : bool, default False
+        Whether the begin is for a successor job.
+
+    Returns
+    -------
+    datetime.datetime or None
+        The firing, no earlier than now; None if no dispatch is active.
     """
     t = now()
     firings = []
@@ -45,11 +68,36 @@ def earliest_begin(
 
 
 def slurm_time(dt: datetime.datetime) -> str:
+    """Format ``dt`` as Slurm takes a time, in local time.
+
+    Parameters
+    ----------
+    dt : datetime.datetime
+        A timezone-aware time.
+
+    Returns
+    -------
+    str
+        ``YYYY-MM-DDTHH:MM:SS``.
+    """
     return dt.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def pull_successor_forward(dispatchdir: str, begin: datetime.datetime) -> bool:
-    """Move pending daemon jobs' start up to ``begin``; False if none."""
+    """Move pending daemon jobs' start up to ``begin``; False if none.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The daemon's dispatchdir.
+    begin : datetime.datetime
+        The latest start to allow.
+
+    Returns
+    -------
+    bool
+        Whether any daemon job was pending.
+    """
     jobs = queued_chain_jobs(dispatchdir)
     for jobid, start in jobs:
         try:

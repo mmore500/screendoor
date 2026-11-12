@@ -1,13 +1,18 @@
+from __future__ import annotations
+
 import os
 import shlex
 import subprocess
 import time
+import typing
 
 from ...auxlib._default_python_command import default_python_command
 from ._procs import job_dir, read_pidfile
 
 
-def launch(*, worker: str | None = None, pidfile_wait_s: float = 30.0):
+def launch(
+    *, worker: str | None = None, pidfile_wait_s: float = 30.0
+) -> typing.Callable[[dict, str, list[list[dict]]], None]:
     """Run each batch as a detached local process, under coreutils
     ``timeout`` if ``trial_batch_timeout`` is set.
 
@@ -15,13 +20,28 @@ def launch(*, worker: str | None = None, pidfile_wait_s: float = 30.0):
     directory as it starts, which is how poke, kill and throttle find it.
     ``worker`` is the command that starts the worker; by default, this
     interpreter's.
+
+    Parameters
+    ----------
+    worker : str or None, default None
+        The command that starts the worker.
+    pidfile_wait_s : float, default 30.0
+        How long the hook waits for each batch to write its pidfile.
+
+    Returns
+    -------
+    Callable[[dict, str, list], None]
+        The ``how_launch`` hook: ``(ctx, name, batches)`` starts each
+        batch and waits until all have written their pidfiles. It raises
+        RuntimeError if one has not within ``pidfile_wait_s``.
     """
     worker = worker or f"{default_python_command()} -m screendoor.trial.worker"
 
-    def launch(ctx, name: str, batches: list) -> None:
+    def launch(ctx: dict, name: str, batches: list[list[dict]]) -> None:
         jdir = job_dir(ctx, name)
         os.makedirs(jdir, exist_ok=True)
-        timeout = ctx.record["trial_batch_timeout"]
+        timeout = ctx["dispatch"]["trial_batch_timeout"]
+        dispatchdir = shlex.quote(ctx["dispatchdir"])
         prefix = f"timeout {int(timeout)} " if timeout else ""
         pidfiles = []
         for i, batch in enumerate(batches):
@@ -39,8 +59,8 @@ def launch(*, worker: str | None = None, pidfile_wait_s: float = 30.0):
             )
             script = (
                 f"( {stamp} > {q}.tmp && mv {q}.tmp {q} && "
-                f"exec {prefix}{worker} --dispatchdir {shlex.quote(ctx.dispatchdir)} "
-                f"--dispatch {ctx.dispatch_uuid} {uuids} "
+                f"exec {prefix}{worker} --dispatchdir {dispatchdir} "
+                f"--dispatch {ctx['dispatch_uuid']} {uuids} "
                 f") </dev/null >>{log} 2>&1 &"
             )
             # its own session, so that kill can signal the whole batch

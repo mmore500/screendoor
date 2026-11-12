@@ -127,7 +127,7 @@ def test_kill_stops_the_trial_processes(dispatchdir):
     while os.path.exists(f"/proc/{script_pid}") and time.time() < deadline:
         time.sleep(0.05)
     assert not os.path.exists(f"/proc/{script_pid}")  # the script itself
-    assert not is_alive(pidfile(ctx, t["job"]))
+    assert not is_alive(pidfile(ctx.hook_ctx, t["job"]))
     (t,) = ctx.read_trials()
     assert (t["status"], t["kills"], t["result"]) == ("killed", 1, None)
     assert run_tick_once(dispatchdir, force=True) == []

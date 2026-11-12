@@ -1,16 +1,40 @@
+from __future__ import annotations
+
 import json
 import logging
 import os
 import subprocess
 import tempfile
 import threading
+import typing
+
+if typing.TYPE_CHECKING:
+    from ..auxlib._DispatchContext import DispatchContext
 
 TAG = "!!!screendoor:"
 PIPE_GRACE_S = 10  # how long output may trail the script's exit
 
 
-def latest_request(submissions: list, trial_uuid: str) -> dict:
-    """The trial's latest ``requested`` submission."""
+def latest_request(submissions: list[dict], trial_uuid: str) -> dict:
+    """The trial's latest ``requested`` submission.
+
+    Parameters
+    ----------
+    submissions : list of dict
+        The dispatch's trial submissions.
+    trial_uuid : str
+        The trial.
+
+    Returns
+    -------
+    dict
+        The ``requested`` submission with the highest ``attempt``.
+
+    Raises
+    ------
+    LookupError
+        If the trial was never requested.
+    """
     requests = [
         e
         for e in submissions
@@ -24,7 +48,9 @@ def latest_request(submissions: list, trial_uuid: str) -> dict:
 class _TagCollector:
     """Collects the tagged lines of one trial; fed from two threads."""
 
-    def __init__(self, ctx, trial_uuid: str, attempt: int):
+    def __init__(
+        self, ctx: DispatchContext, trial_uuid: str, attempt: int
+    ) -> None:
         self.ctx, self.trial_uuid, self.attempt = ctx, trial_uuid, attempt
         self.result = None  # null unless the script sends one
         self.channels: dict[str, list] = {}
@@ -55,7 +81,9 @@ class _TagCollector:
             )
 
 
-def _pump(stream, out_path: str, collector: _TagCollector) -> None:
+def _pump(
+    stream: typing.IO[bytes], out_path: str, collector: _TagCollector
+) -> None:
     with open(out_path, "ab") as out:
         for raw in iter(stream.readline, b""):
             out.write(raw)
@@ -63,7 +91,11 @@ def _pump(stream, out_path: str, collector: _TagCollector) -> None:
             collector.feed(raw.decode(errors="replace"))
 
 
-def run_trial(ctx, trial_uuid: str, submissions: list | None = None) -> None:
+def run_trial(
+    ctx: DispatchContext,
+    trial_uuid: str,
+    submissions: list[dict] | None = None,
+) -> None:
     """Run one trial to completion and record how it ended.
 
     The script runs in a fresh temporary directory, deleted afterwards;
@@ -73,6 +105,15 @@ def run_trial(ctx, trial_uuid: str, submissions: list | None = None) -> None:
     trial payload is ``completed``, with the script's result, if it
     exited 0, else ``failed``. ``submissions`` saves re-reading the trial
     submissions for each trial of a batch.
+
+    Parameters
+    ----------
+    ctx : DispatchContext
+        The dispatch the trial belongs to.
+    trial_uuid : str
+        The trial to run.
+    submissions : list of dict or None, default None
+        The dispatch's trial submissions; read from ``ctx`` if None.
     """
     if submissions is None:
         submissions = ctx.read_trial_submissions()
@@ -118,7 +159,13 @@ def run_trial(ctx, trial_uuid: str, submissions: list | None = None) -> None:
         ctx.write_trial_payload({"event": "failed", **base})
 
 
-def _run_script(script, cwd, env, attempt_dir, collector) -> int:
+def _run_script(
+    script: str,
+    cwd: str,
+    env: dict[str, str],
+    attempt_dir: str,
+    collector: _TagCollector,
+) -> int:
     """Run ``script``, logging and scanning its output; return its exit
     code."""
     proc = subprocess.Popen(

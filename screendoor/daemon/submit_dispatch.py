@@ -10,7 +10,19 @@ import sys
 from ..auxlib._format_cli_description import format_cli_description
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Run submit_dispatch from the command line, printing the dispatch_uuid.
+
+    Parameters
+    ----------
+    argv : list of str or None, default None
+        The arguments; None for ``sys.argv[1:]``.
+
+    Returns
+    -------
+    int
+        The exit code: 0, or 2 for an invalid dispatch or dispatchdir.
+    """
     from ..auxlib._DispatchContext import DispatchdirConfigError
     from ._submit_dispatch import submit_dispatch
 

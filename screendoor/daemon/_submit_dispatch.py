@@ -22,6 +22,23 @@ SETTINGS = {*DEFAULTS, SEED_NAME, "assay", "schedule", "dispatch_uuid"}
 
 
 def validate_dispatch(obj: dict) -> None:
+    """Check a dispatch before it is recorded.
+
+    Checks its keys and their types, its ``schedule``, and that its
+    ``assay`` and every hook evaluate.
+
+    Parameters
+    ----------
+    obj : dict
+        The dispatch, as parsed JSON.
+
+    Raises
+    ------
+    MissingHookError
+        If ``obj`` does not set every hook.
+    ValueError
+        If ``obj`` is otherwise not a valid dispatch.
+    """
     if not isinstance(obj, dict):
         raise ValueError("a dispatch must be a JSON object")
     for key in ("assay", "schedule"):
@@ -72,6 +89,26 @@ def submit_dispatch(obj: dict, dispatchdir: str) -> str:
     operating system) and any absent ``meta_*`` label (``"0"`` for
     ``meta_redo``, ``"default"`` for the rest). Refuses a dispatch whose
     run directory an open dispatch already uses.
+
+    Parameters
+    ----------
+    obj : dict
+        The dispatch, as parsed JSON; not modified.
+    dispatchdir : str
+        The dispatchdir to record it in.
+
+    Returns
+    -------
+    str
+        The new dispatch's dispatch_uuid.
+
+    Raises
+    ------
+    DispatchdirConfigError
+        If the dispatchdir's ``screendoor.json`` is missing or wrong.
+    ValueError
+        If ``obj`` is not a valid dispatch, its dispatch_uuid exists, or
+        an open dispatch uses its run directory.
     """
     obj = json.loads(json.dumps(obj))  # a deep copy that must be JSON
     validate_dispatch(obj)
@@ -90,7 +127,6 @@ def submit_dispatch(obj: dict, dispatchdir: str) -> str:
                 "change meta_redo"
             )
     ddhooks.write_dispatch_submissions(
-        ddhooks,
         {
             "event": "submitted",
             "dispatch_uuid": obj["dispatch_uuid"],

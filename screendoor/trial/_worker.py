@@ -1,18 +1,36 @@
 import logging
 
-from ..auxlib._DispatchContext import load_dispatches
+from ..auxlib._DispatchContext import load_dispatch
 from ._run_trial import run_trial
 
 
-def worker(dispatchdir: str, dispatch_uuid: str, trial_uuids: list) -> int:
+def worker(
+    dispatchdir: str, dispatch_uuid: str, trial_uuids: list[str]
+) -> int:
     """Run trials one after another; return a process exit code.
 
     One trial crashing does not stop the rest of the batch.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The dispatchdir holding the dispatch.
+    dispatch_uuid : str
+        The dispatch the trials belong to.
+    trial_uuids : list of str
+        The trials to run, in order.
+
+    Returns
+    -------
+    int
+        1 if a trial crashed, else 0.
+
+    Raises
+    ------
+    LookupError
+        If ``dispatchdir`` has no dispatch ``dispatch_uuid``.
     """
-    ctxs = {c.dispatch_uuid: c for c in load_dispatches(dispatchdir)}
-    if dispatch_uuid not in ctxs:
-        raise LookupError(f"no dispatch {dispatch_uuid} in {dispatchdir}")
-    ctx = ctxs[dispatch_uuid]
+    ctx = load_dispatch(dispatchdir, dispatch_uuid)
     submissions = ctx.read_trial_submissions()
     exit_code = 0
     for trial_uuid in trial_uuids:

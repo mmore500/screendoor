@@ -6,7 +6,19 @@ import sys
 from ..auxlib._format_cli_description import format_cli_description
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Run the worker from the command line.
+
+    Parameters
+    ----------
+    argv : list of str or None, default None
+        The arguments; ``sys.argv[1:]`` if None.
+
+    Returns
+    -------
+    int
+        The process exit code.
+    """
     from ._worker import worker
 
     parser = argparse.ArgumentParser(

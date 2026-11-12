@@ -6,7 +6,18 @@ from ...orch.slurm._render_sbatch import render_preamble
 
 
 def chain_job_name(dispatchdir: str) -> str:
-    """The job name shared by every daemon job of ``dispatchdir``."""
+    """The job name shared by every daemon job of ``dispatchdir``.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The daemon's dispatchdir.
+
+    Returns
+    -------
+    str
+        ``screendoor-daemon-<digest of its absolute path>``.
+    """
     digest = hashlib.sha256(os.path.abspath(dispatchdir).encode()).hexdigest()
     return f"screendoor-daemon-{digest[:8]}"
 
@@ -23,6 +34,24 @@ def render_daemon_sbatch(
 
     The successor is timed by its own ``--begin``, not by waiting for
     this job to end.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The daemon's dispatchdir.
+    python : str
+        The command that runs python with screendoor importable.
+    sbatch_flags : str, default ""
+        Extra sbatch flags, as one shell string, passed to the successor.
+    script_dir : str, default "~/slurmscripts"
+        Where the job keeps a copy of its script.
+    log_dir : str, default "~/slurmlogs"
+        Where the job writes its log.
+
+    Returns
+    -------
+    str
+        The sbatch script.
     """
     wd = shlex.quote(os.path.abspath(dispatchdir))
     lines = [

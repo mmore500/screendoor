@@ -6,13 +6,26 @@ from ._append_jsonl_line import SCHEMA
 
 
 class SchemaTooNewError(RuntimeError):
-    pass
+    """A record's schema is newer than this code understands."""
 
 
 def read_jsonl_tolerant(path: str) -> list[dict]:
     """Read records, skipping torn or spliced lines with a warning.
 
-    Raises SchemaTooNewError on a schema newer than this code understands.
+    Parameters
+    ----------
+    path : str
+        The JSONL file; a missing one reads as empty.
+
+    Returns
+    -------
+    list of dict
+        The records, in file order.
+
+    Raises
+    ------
+    SchemaTooNewError
+        On a schema newer than this code understands.
     """
     if not os.path.exists(path):
         return []
@@ -22,7 +35,25 @@ def read_jsonl_tolerant(path: str) -> list[dict]:
 
 def parse_jsonl_tolerant(data: bytes, path: str) -> list[dict]:
     """Parse a JSONL file's bytes as read_jsonl_tolerant does; ``path`` is
-    for messages only."""
+    for messages only.
+
+    Parameters
+    ----------
+    data : bytes
+        The file's contents.
+    path : str
+        The file's path.
+
+    Returns
+    -------
+    list of dict
+        The records, in order.
+
+    Raises
+    ------
+    SchemaTooNewError
+        On a schema newer than this code understands.
+    """
     lines = data.split(b"\n")
     records = []
     for lineno, line in enumerate(lines, start=1):

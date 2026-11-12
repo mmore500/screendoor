@@ -37,6 +37,27 @@ def submit_daemon(
     Returns None, queueing nothing, when no dispatch is active or (unless
     ``successor``) a daemon job is already queued; that job is pulled
     forward instead.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The dispatchdir to run a daemon for.
+    python : str or None, default None
+        The command that runs python with screendoor importable; None for
+        default_python_command.
+    sbatch_flags : str, default ""
+        Extra sbatch flags, as one shell string.
+    script_dir : str, default "~/slurmscripts"
+        Where the job keeps a copy of its script.
+    log_dir : str, default "~/slurmlogs"
+        Where the job writes its log.
+    successor : bool, default False
+        Whether a daemon job is queueing its successor.
+
+    Returns
+    -------
+    str or None
+        The queued job's id, or None if none was queued.
     """
     begin = earliest_begin(dispatchdir, successor=successor)
     if begin is None:
@@ -75,6 +96,11 @@ def cancel_chain(dispatchdir: str) -> None:
     """Cancel the queued daemon job if no dispatch is left active.
 
     A daemon job that is running finishes its tick, which does nothing.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The daemon's dispatchdir.
     """
     jobs = [jobid for jobid, _ in queued_chain_jobs(dispatchdir)]
     if jobs and earliest_begin(dispatchdir) is None:

@@ -4,8 +4,8 @@ from ._select_dispatches import select_dispatches
 
 
 def kill_dispatch(
-    dispatchdir: str, dispatch_uuids: list | None = None
-) -> list:
+    dispatchdir: str, dispatch_uuids: list[str] | None = None
+) -> list[str]:
     """Cancel in-progress trials and pause their dispatches.
 
     Acts on every open dispatch, or on those whose uuids start with one
@@ -13,6 +13,23 @@ def kill_dispatch(
     trials are not failed: the daemon skips it until resume_dispatch, then
     relaunches the cancelled trials without counting a retry. Safe to
     repeat. Returns the uuids acted on.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The dispatchdir holding the dispatches.
+    dispatch_uuids : list of str or None, default None
+        Prefixes of the uuids to act on; None or empty for every one.
+
+    Returns
+    -------
+    list of str
+        The dispatch_uuids acted on.
+
+    Raises
+    ------
+    LookupError
+        If a prefix matches no dispatch, or more than one.
     """
     done = []
     with dispatchdir_lock(dispatchdir, wait=True):  # not mid-tick
@@ -25,7 +42,7 @@ def kill_dispatch(
             trials = ctx.read_trials() if ctx.is_setup else []
             trials = [t for t in trials if t["status"] == "requested"]
             if trials:
-                ctx.hook("how_kill")(ctx, trials)
+                ctx.call_hook("how_kill", trials)
             for t in trials:
                 ctx.write_trial_submission(
                     {

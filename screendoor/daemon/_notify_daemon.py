@@ -11,20 +11,30 @@ def notify_daemon(dispatchdir: str, level: str, message: str) -> None:
     """Send one of the daemon's own notifications; never raises.
 
     ``level`` is ``liveness`` or ``termination``, each with a
-    ``how_notify_<level>`` hook in ``screendoor.json``. The notifier gets
-    the DispatchdirHooks in place of a dispatch, and what it returns is
-    appended to ``<dispatchdir>/dispatch_notify.jsonl``.
+    ``how_notify_<level>`` hook in ``screendoor.json``. The notifier's ctx
+    is ``{"dispatchdir"}``, with no ``dispatch_uuid``, and what it returns
+    is appended to ``<dispatchdir>/dispatch_notify.jsonl``.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The daemon's dispatchdir.
+    level : str
+        ``liveness`` or ``termination``.
+    message : str
+        The notification text.
     """
     try:
         hooks = DispatchdirHooks(dispatchdir)
-        hook = getattr(hooks, f"notify_{level}")
+        hook = hooks.hook(f"how_notify_{level}")
         path = os.path.join(hooks.dispatchdir, "dispatch_notify.jsonl")
         history = [
             e for e in read_jsonl_tolerant(path) if e.get("level") == level
         ]
-        events = hook(hooks, level, message, {}, history, now()) or []
+        ctx = hooks.hook_ctx
+        events = hook(ctx, level, message, {}, history, now()) or []
         if hasattr(hook, "flush"):
-            events += hook.flush(hooks, level, history, now()) or []
+            events += hook.flush(ctx, level, history, now()) or []
         for event in events:
             record = {"event": "sent", "message": message, **event}
             append_jsonl_line(path, {**record, "level": level})

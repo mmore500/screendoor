@@ -9,6 +9,18 @@ def decode_slot(i: int, raw: bytes) -> dict | None:
     A slot is valid if it parses as an envelope whose index is ``i`` and
     whose digest matches its record. Empty, torn, mixed and misplaced
     slots all give None.
+
+    Parameters
+    ----------
+    i : int
+        The slot's index.
+    raw : bytes
+        The slot's bytes.
+
+    Returns
+    -------
+    dict or None
+        The record, or None if the slot is not valid.
     """
     try:
         envelope = json.loads(raw.replace(b"\0", b"").strip())

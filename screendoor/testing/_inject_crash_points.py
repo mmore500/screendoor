@@ -1,4 +1,5 @@
 import contextlib
+import typing
 
 from ..auxlib import _append_jsonl_line
 
@@ -8,11 +9,22 @@ class InjectedCrash(BaseException):
 
 
 @contextlib.contextmanager
-def inject_crash_points(after_n_appends: int):
-    """Raise InjectedCrash right after the n-th record append in the block."""
+def inject_crash_points(after_n_appends: int) -> typing.Iterator[None]:
+    """Raise InjectedCrash right after the n-th record append in the block.
+
+    Parameters
+    ----------
+    after_n_appends : int
+        The append to crash after, counting from 1.
+
+    Raises
+    ------
+    InjectedCrash
+        Right after the ``after_n_appends``-th append.
+    """
     appends = 0
 
-    def hook(path, record):
+    def hook(path: str, record: dict) -> None:
         nonlocal appends
         appends += 1
         if appends == after_n_appends:

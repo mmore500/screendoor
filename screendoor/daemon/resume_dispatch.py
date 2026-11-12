@@ -6,7 +6,19 @@ import sys
 from ..auxlib._format_cli_description import format_cli_description
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Run resume_dispatch from the command line.
+
+    Parameters
+    ----------
+    argv : list of str or None, default None
+        The arguments; None for ``sys.argv[1:]``.
+
+    Returns
+    -------
+    int
+        The exit code: 0, or 2 if a dispatch prefix matches none or several.
+    """
     from ._resume_dispatch import resume_dispatch
 
     parser = argparse.ArgumentParser(

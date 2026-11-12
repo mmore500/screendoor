@@ -2,13 +2,31 @@ import ast
 import importlib
 import os
 import sys
+import typing
 
 
-def lazy_attach_stub(package_name: str, init_file: str) -> tuple:
+def lazy_attach_stub(
+    package_name: str, init_file: str
+) -> tuple[
+    typing.Callable[[str], typing.Any],
+    typing.Callable[[], list[str]],
+    list[str],
+]:
     """Lazily attach the names in the ``__init__.pyi`` beside ``init_file``.
 
     Understands ``from ._mod import name`` and ``from . import sub``.
-    Returns ``(__getattr__, __dir__, __all__)`` to assign at module level.
+
+    Parameters
+    ----------
+    package_name : str
+        The package's ``__name__``.
+    init_file : str
+        The package's ``__file__``.
+
+    Returns
+    -------
+    tuple
+        ``(__getattr__, __dir__, __all__)`` to assign at module level.
     """
     stub = os.path.splitext(init_file)[0] + ".pyi"
     try:
@@ -28,7 +46,7 @@ def lazy_attach_stub(package_name: str, init_file: str) -> tuple:
                     else (f".{alias.name}", None)
                 )
 
-    def __getattr__(name: str):
+    def __getattr__(name: str) -> typing.Any:
         if name not in targets:
             raise AttributeError(
                 f"module {package_name!r} has no attribute {name!r}"

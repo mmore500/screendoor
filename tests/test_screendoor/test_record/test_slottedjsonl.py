@@ -230,8 +230,8 @@ def test_mismatched_slot_size_raises(tmp_path):
     )
     (ctx,) = load_dispatches(str(tmp_path))
     with pytest.raises(ValueError, match="8192-byte slots, not 4096"):
-        sj.read_trial_payloads(slot_bytes=4096)(ctx)
-    (payload,) = sj.read_trial_payloads(slot_bytes=8192)(ctx)
+        sj.read_trial_payloads(slot_bytes=4096)(ctx.hook_ctx)
+    (payload,) = sj.read_trial_payloads(slot_bytes=8192)(ctx.hook_ctx)
     assert payload["trial_uuid"] == r["trials"][0]["trial_uuid"]
 
 
@@ -246,8 +246,8 @@ def test_failed_never_replaces_completed(tmp_path):
     (ctx,) = load_dispatches(str(tmp_path))
     (t,) = r["trials"]
     late = {"event": "failed", "trial_uuid": t["trial_uuid"], "attempt": 0}
-    sj.write_trial_payloads()(ctx, {**late, "task_id": t["task_id"]})
-    (payload,) = sj.read_trial_payloads()(ctx)
+    sj.write_trial_payloads()(ctx.hook_ctx, {**late, "task_id": t["task_id"]})
+    (payload,) = sj.read_trial_payloads()(ctx.hook_ctx)
     assert payload["event"] == "completed"
 
 

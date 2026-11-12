@@ -26,7 +26,28 @@ def _parse_field(text: str, lo: int, hi: int) -> set[int]:
     return values
 
 
-def parse_cron(expr: str) -> tuple:
+def parse_cron(
+    expr: str,
+) -> tuple[set[int], set[int], set[int], set[int], set[int], bool, bool]:
+    """Parse a five-field cron expression.
+
+    Parameters
+    ----------
+    expr : str
+        Minute, hour, day of month, month and day of week.
+
+    Returns
+    -------
+    tuple
+        ``(minute, hour, dom, month, dow, dom_star, dow_star)``: the values
+        each field allows (Sunday is day 0), and whether day of month and
+        day of week are ``*``.
+
+    Raises
+    ------
+    ValueError
+        If ``expr`` is not five valid fields.
+    """
     fields = expr.split()
     if len(fields) != 5:
         raise ValueError(f"cron expression needs five fields: {expr!r}")
@@ -45,6 +66,23 @@ def next_cron_firing(
 
     Supports lists, ranges and steps. As in Vixie cron, when both day of
     month and day of week are restricted, either may match.
+
+    Parameters
+    ----------
+    expr : str
+        Minute, hour, day of month, month and day of week.
+    after : datetime.datetime
+        The time to search from.
+
+    Returns
+    -------
+    datetime.datetime
+        The firing, in ``after``'s timezone.
+
+    Raises
+    ------
+    ValueError
+        If ``expr`` is invalid or never fires.
     """
     minute, hour, dom, month, dow, dom_star, dow_star = parse_cron(expr)
     tz = after.tzinfo

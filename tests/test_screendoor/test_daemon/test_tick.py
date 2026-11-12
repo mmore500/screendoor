@@ -38,8 +38,8 @@ def submit(dispatchdir, assay, *, fake_trial=None, **settings):
 def dispatch_events(dispatchdir, event):
     (ctx,) = load_dispatches(dispatchdir)
     events = [
-        *ctx.ddhooks.read_dispatch_payloads(ctx.ddhooks),
-        *ctx.ddhooks.read_dispatch_telemetry(ctx.ddhooks),
+        *ctx.ddhooks.read_dispatch_payloads(),
+        *ctx.ddhooks.read_dispatch_telemetry(),
     ]
     return [e for e in events if e["event"] == event]
 

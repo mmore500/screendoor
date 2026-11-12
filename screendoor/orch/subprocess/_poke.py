@@ -1,10 +1,21 @@
+from __future__ import annotations
+
+import typing
+
 from ._procs import is_alive, pidfile
 
 
-def poke():
-    """Report trials whose batch's local process is not running."""
+def poke() -> typing.Callable[[dict, list[dict]], set[str]]:
+    """Report trials whose batch's local process is not running.
 
-    def poke(ctx, trials: list) -> set:
+    Returns
+    -------
+    Callable[[dict, list], set]
+        The ``how_poke`` hook: ``(ctx, trials)`` returns the uuids of the
+        trials whose batch is not running.
+    """
+
+    def poke(ctx: dict, trials: list[dict]) -> set[str]:
         return {
             t["trial_uuid"]
             for t in trials

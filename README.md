@@ -190,9 +190,11 @@ Hooks, and the assay, are expressions, evaluated in the namespace that
 raises. screendoor's own hooks are factories that take keyword arguments
 only, such as `scd.orch.slurm.throttle(max_jobs=500)`. A dispatch sets
 every name in `scd.auxlib.HOOK_NAMES`; `screendoor.json` sets every name
-in `scd.auxlib.DISPATCHDIR_HOOK_NAMES`. Each hook's first argument is its
-context: the dispatch's, or for `screendoor.json` hooks the dispatchdir's
-(except `how_log_info`, which gets a message).
+in `scd.auxlib.DISPATCHDIR_HOOK_NAMES`. Each hook's first argument,
+`ctx`, is a dict: `{"dispatchdir", "run_dir", "dispatch_uuid",
+"dispatch"}` for a dispatch's hooks, the last its record, and
+`{"dispatchdir"}` for `screendoor.json` hooks (except `how_log_info`,
+which gets only a message).
 
 | Hook | Called as |
 |---|---|

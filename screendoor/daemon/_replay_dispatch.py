@@ -1,4 +1,5 @@
 import os
+import typing
 
 from ..auxlib._DispatchContext import load_dispatches
 from ..auxlib._canonical_json import canonical_json
@@ -7,8 +8,11 @@ from ._apply_actions import check_actions, churn_step, plan_actions
 
 
 def replay_dispatch(
-    run_dir: str, *, assay: str | None = None, file=None
-) -> list:
+    run_dir: str,
+    *,
+    assay: str | None = None,
+    file: typing.TextIO | None = None,
+) -> list[dict]:
     """Re-run churn at every recorded step, from the state it saw then.
 
     A step is the churn call that made some trial submissions or memos;
@@ -17,6 +21,26 @@ def replay_dispatch(
 
     With ``assay``, replay that assay expression instead of the recorded
     one. Prints a line per step and returns the per-step reports.
+
+    Parameters
+    ----------
+    run_dir : str
+        The dispatch's run directory.
+    assay : str or None, default None
+        An assay expression to replay in place of the recorded one.
+    file : TextIO or None, default None
+        Where to print; None for stdout.
+
+    Returns
+    -------
+    list of dict
+        One per step, oldest first: ``ts``, ``churn_step``, ``match``,
+        ``recorded_launches`` and ``replayed_launches``.
+
+    Raises
+    ------
+    LookupError
+        If no dispatch has ``run_dir``.
     """
     run_dir = os.path.abspath(run_dir)
     # run dirs are <dispatchdir>/project=.../date=...

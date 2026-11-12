@@ -7,7 +7,19 @@ import sys
 from ..auxlib._format_cli_description import format_cli_description
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Run print_status, or dispatch_status with ``--json``.
+
+    Parameters
+    ----------
+    argv : list of str or None, default None
+        The arguments; None for ``sys.argv[1:]``.
+
+    Returns
+    -------
+    int
+        The exit code: 0.
+    """
     from ._print_status import dispatch_status, print_status
 
     parser = argparse.ArgumentParser(

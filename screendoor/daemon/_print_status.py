@@ -1,19 +1,39 @@
+from __future__ import annotations
+
+import typing
+
 from ..auxlib._DispatchContext import NAMES, SEED_NAME, load_dispatches
 from ..auxlib._tally_trials import tally_trials
 from ._next_firing import next_firing
 
+if typing.TYPE_CHECKING:
+    from ..auxlib._DispatchContext import DispatchContext
 
-def _state(ctx) -> str:
+
+def _state(ctx: DispatchContext) -> str:
     if ctx.completed:
         return ctx.completed["outcome"]
     return "killed" if ctx.killed else "open"
 
 
-def dispatch_status(dispatchdir: str, *, max_failures: int = 3) -> list:
+def dispatch_status(dispatchdir: str, *, max_failures: int = 3) -> list[dict]:
     """One dict per dispatch: its labels and state, trial counts and
     tally, when it last ticked and is next due, whether it is throttled or
     churn is raising, and the exit codes of the first ``max_failures``
-    failed trials (None: lost)."""
+    failed trials (None: lost).
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The dispatchdir holding the dispatches.
+    max_failures : int, default 3
+        How many failed trials to list per dispatch.
+
+    Returns
+    -------
+    list of dict
+        One row per dispatch, JSON-serializable.
+    """
     rows = []
     for ctx in load_dispatches(dispatchdir):
         trials = ctx.read_trials() if ctx.is_setup else []
@@ -49,7 +69,7 @@ def dispatch_status(dispatchdir: str, *, max_failures: int = 3) -> list:
     return rows
 
 
-def _lines(row: dict) -> list:
+def _lines(row: dict) -> list[str]:
     counts = ", ".join(f"{k}={v}" for k, v in row["trials"].items())
     extras = ("retries", "kills", "warnings")
     tally = ", ".join(f"{k} {row['tally'][k]}" for k in extras)
@@ -91,9 +111,27 @@ def _lines(row: dict) -> list:
 
 
 def print_status(
-    dispatchdir: str, *, file=None, max_failures: int = 3
-) -> list:
-    """Print dispatch_status as text; return its rows."""
+    dispatchdir: str,
+    *,
+    file: typing.TextIO | None = None,
+    max_failures: int = 3,
+) -> list[dict]:
+    """Print dispatch_status as text; return its rows.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The dispatchdir holding the dispatches.
+    file : TextIO or None, default None
+        Where to print; None for stdout.
+    max_failures : int, default 3
+        How many failed trials to list per dispatch.
+
+    Returns
+    -------
+    list of dict
+        The rows of dispatch_status.
+    """
     rows = dispatch_status(dispatchdir, max_failures=max_failures)
     for row in rows:
         print(*_lines(row), sep="\n", file=file)

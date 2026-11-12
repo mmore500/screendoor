@@ -3,7 +3,13 @@ import os
 
 
 def begin_prod_logging(dispatchdir: str) -> None:
-    """Log to stderr and ``<dispatchdir>/dispatch_log.txt``."""
+    """Log to stderr and ``<dispatchdir>/dispatch_log.txt``.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The dispatchdir, created if missing.
+    """
     os.makedirs(dispatchdir, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,

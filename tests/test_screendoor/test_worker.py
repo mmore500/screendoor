@@ -34,7 +34,7 @@ def test_tags_and_channels():
     assert t["result"] == {"final": True}  # last one wins
     assert sorted(x["e"] for x in t["channels"]["telemetry"]) == [1, 2]
     assert t["channels"]["custom"] == [[1, 2]]
-    events = ctx.hook("how_read_trial_telemetry")(ctx)
+    events = ctx.read_trial_telemetry()
     assert sorted(e["event"] for e in events) == [
         "started",  # the worker's: when and where the trial ran
         "telemetry",
@@ -140,6 +140,6 @@ def test_cleanup_error_is_recorded_not_raised(tmp_path):
     )
     assert r["completed"]["outcome"] == "succeeded"
     (ctx,) = load_dispatches(r["dispatchdir"])
-    events = ctx.ddhooks.read_dispatch_telemetry(ctx.ddhooks)
+    events = ctx.ddhooks.read_dispatch_telemetry()
     (e,) = [e for e in events if e["event"] == "cleanup_error"]
     assert e["hook"] == "success" and "ZeroDivisionError" in e["error"]

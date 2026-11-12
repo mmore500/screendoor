@@ -1,3 +1,5 @@
+import typing
+
 from .._knockout import (
     ACCEPT,
     KnockoutSearch,
@@ -8,8 +10,19 @@ from .._knockout import (
 )
 
 
-def minesweeper_stage2_segments(sites) -> list:
-    """The 26 multi-scale Stage-2 deletion segments (Rees-Garbutt 2020)."""
+def minesweeper_stage2_segments(sites: list[int]) -> list[frozenset]:
+    """The 26 multi-scale Stage-2 deletion segments (Rees-Garbutt 2020).
+
+    Parameters
+    ----------
+    sites : list of int
+        The non-essential sites, in order.
+
+    Returns
+    -------
+    list of frozenset
+        The nonempty segments, without repeats.
+    """
     ordered = list(sites)
     m = len(ordered)
     raw = [frozenset(ordered)]
@@ -28,9 +41,16 @@ class MinesweeperSearch(KnockoutSearch):
 
     policy = "minesweeper"
 
-    def search(self):
+    def search(self) -> typing.Generator[dict, dict, str]:
         """Generator: 4-stage Minesweeper divide and conquer (Rees-Garbutt
-        2020)."""
+        2020).
+
+        Returns
+        -------
+        Generator[dict, dict, str]
+            Yields genotype batches, is sent their verdicts, and returns
+            the search's status.
+        """
         # Every site is screened, as in the original under an exact oracle.
         stage1 = yield from self.test_all(
             singletons(sorted(self.current)), "minesweeper_stage1"
@@ -75,8 +95,32 @@ class MinesweeperSearch(KnockoutSearch):
                 return status
 
 
-def churn(dispatch, trial_submissions, trial_payloads, memo):
-    """Skeletonize by 4-stage Minesweeper divide and conquer. See docs/skeletonization.md."""
+def churn(
+    dispatch: dict,
+    trial_submissions: list[dict],
+    trial_payloads: list[dict],
+    memo: list[dict],
+) -> list[dict]:
+    """Skeletonize by 4-stage Minesweeper divide and conquer.
+
+    See docs/skeletonization.md.
+
+    Parameters
+    ----------
+    dispatch : dict
+        The dispatch record, with ``assay_kwargs``.
+    trial_submissions : list of dict
+        The dispatch's trial submissions.
+    trial_payloads : list of dict
+        The dispatch's trial payloads.
+    memo : list of dict
+        Unused: the search is replayed from the trials.
+
+    Returns
+    -------
+    list of dict
+        This step's actions.
+    """
     return search_churn(
         MinesweeperSearch, dispatch, trial_submissions, trial_payloads
     )

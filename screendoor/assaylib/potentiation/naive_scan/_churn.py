@@ -1,15 +1,21 @@
 import json
+import typing
 
 from .... import churn as scd_churn
 from ....auxlib import canonical_json
 from ..._accepted import accepted
 
 
-def _env_value(timepoint) -> str:
+def _env_value(timepoint: typing.Any) -> str:
     return timepoint if isinstance(timepoint, str) else json.dumps(timepoint)
 
 
-def churn(dispatch, trial_submissions, trial_payloads, memo):
+def churn(
+    dispatch: dict,
+    trial_submissions: list[dict],
+    trial_payloads: list[dict],
+    memo: list[dict],
+) -> list[dict]:
     """Replay evolution from each timepoint in turn; stop at the first
     timepoint from which a replay succeeds.
 
@@ -27,6 +33,22 @@ def churn(dispatch, trial_submissions, trial_payloads, memo):
     Succeeds with the first potentiated ``timepoint`` and its ``index``,
     or None for both if no replay from any timepoint succeeded, and a
     ``scanned`` row per timepoint tried.
+
+    Parameters
+    ----------
+    dispatch : dict
+        The dispatch record, with ``assay_kwargs``.
+    trial_submissions : list of dict
+        The dispatch's trial submissions.
+    trial_payloads : list of dict
+        The dispatch's trial payloads.
+    memo : list of dict
+        Unused.
+
+    Returns
+    -------
+    list of dict
+        This step's actions.
     """
     trials = scd_churn.fold_trials(trial_submissions, trial_payloads)
     kw = dispatch["assay_kwargs"]

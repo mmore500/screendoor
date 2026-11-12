@@ -1,6 +1,7 @@
 from ._DispatchContext import DISPATCHDIR_HOOK_NAMES as DISPATCHDIR_HOOK_NAMES
 from ._DispatchContext import DispatchContext as DispatchContext
 from ._DispatchContext import HOOK_NAMES as HOOK_NAMES
+from ._DispatchContext import load_dispatch as load_dispatch
 from ._DispatchContext import load_dispatches as load_dispatches
 from ._append_jsonl_line import append_jsonl_line as append_jsonl_line
 from ._batch_trials import batch_trials as batch_trials

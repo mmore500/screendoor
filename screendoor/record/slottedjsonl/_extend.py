@@ -11,6 +11,15 @@ def extend(path: str, n: int, slot_bytes: int | None = None) -> None:
     Safe while writers fill existing slots, and repeatable: it rewrites a
     partial last slot left by a crashed extension. Extensions take turns
     under an exclusive lock on ``<path>.extend.lock``.
+
+    Parameters
+    ----------
+    path : str
+        The slotted file.
+    n : int
+        How many slots it should have.
+    slot_bytes : int or None, default None
+        The slot size; None takes the file's own.
     """
     slot_bytes = resolve_slot(path, slot_bytes)
     with open(path + ".extend.lock", "w") as lock:

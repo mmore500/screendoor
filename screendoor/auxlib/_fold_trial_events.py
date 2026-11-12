@@ -52,7 +52,19 @@ def _fold_trial(trial_uuid: str, events: list[dict]) -> dict | None:
 
 def fold_trial_events(events: list[dict]) -> list[dict]:
     """Fold trial submissions and payloads into one dict per trial, in
-    order of first request; see scd.churn.fold_trials."""
+    order of first request; see scd.churn.fold_trials.
+
+    Parameters
+    ----------
+    events : list of dict
+        Trial submissions and payloads, in any order; records without
+        ``trial_uuid`` are skipped.
+
+    Returns
+    -------
+    list of dict
+        The folded trials; a trial never requested is left out.
+    """
     by_uuid: dict[str, list] = {}
     for ev in events:
         if "trial_uuid" in ev:

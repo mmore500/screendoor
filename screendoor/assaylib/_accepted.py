@@ -1,7 +1,20 @@
-def accepted(result) -> bool:
+import typing
+
+
+def accepted(result: typing.Any) -> bool:
     """Whether a trial result says yes: ``true`` or ``{"accept": true}``.
 
     The built-in assays read pass/fail results this way.
+
+    Parameters
+    ----------
+    result : Any
+        A trial's result.
+
+    Returns
+    -------
+    bool
+        True if the result accepts.
     """
     if isinstance(result, dict):
         return bool(result.get("accept"))

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 import urllib.parse
@@ -17,8 +19,24 @@ def _post(url: str, body: bytes) -> None:
     urllib.request.urlopen(url, data=body, timeout=20).close()
 
 
-def send(ctx, level: str, message: str) -> dict:
-    """Send one Pushover message; return the notify event describing it."""
+def send(ctx: dict, level: str, message: str) -> dict:
+    """Send one Pushover message; return the notify event describing it.
+
+    Parameters
+    ----------
+    ctx : dict or dict
+        The dispatch, or the daemon, the message is from.
+    level : str
+        The notification level, which sets the priority.
+    message : str
+        The text, cut to 1024 characters.
+
+    Returns
+    -------
+    dict
+        A ``sent`` or ``send_failed`` event, or ``suppressed`` if
+        ``$PUSHOVER_USER`` or ``$PUSHOVER_TOKEN`` is unset.
+    """
     user = os.environ.get("PUSHOVER_USER")
     token = os.environ.get("PUSHOVER_TOKEN")
     if not user or not token:
@@ -32,11 +50,12 @@ def send(ctx, level: str, message: str) -> dict:
             "reason": "no_credentials",
             "message": message,
         }
+    label = ctx.get("dispatch_uuid", "daemon")
     body = urllib.parse.urlencode(
         {
             "user": user,
             "token": token,
-            "title": f"screendoor {level} {ctx.dispatch_uuid[:8]}",
+            "title": f"screendoor {level} {label[:8]}",
             "message": message[:1024],
             "priority": PRIORITY.get(level, -1),
         }

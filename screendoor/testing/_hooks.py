@@ -46,9 +46,22 @@ DISPATCHDIR_HOOKS = {
 assert set(DISPATCHDIR_HOOKS) == set(DISPATCHDIR_HOOK_NAMES)
 
 
-def write_dispatchdir_hooks(dispatchdir: str, **overrides) -> str:
+def write_dispatchdir_hooks(dispatchdir: str, **overrides: str) -> str:
     """Write ``<dispatchdir>/screendoor.json`` with DISPATCHDIR_HOOKS and
-    ``overrides``; return its path."""
+    ``overrides``; return its path.
+
+    Parameters
+    ----------
+    dispatchdir : str
+        The dispatchdir, made if missing.
+    **overrides : str
+        Hook expressions, by name, set over DISPATCHDIR_HOOKS.
+
+    Returns
+    -------
+    str
+        The path of the ``screendoor.json`` written.
+    """
     os.makedirs(dispatchdir, exist_ok=True)
     path = os.path.join(dispatchdir, "screendoor.json")
     with open(path, "w", encoding="utf-8") as fh:

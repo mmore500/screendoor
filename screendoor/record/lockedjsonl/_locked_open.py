@@ -3,6 +3,7 @@ import fcntl
 import os
 import threading
 import time
+import typing
 
 POLL_S = 0.05
 
@@ -32,7 +33,7 @@ def _remaining(deadline: float | None) -> float:
 @contextlib.contextmanager
 def locked_open(
     path: str, flags: int, *, exclusive: bool, timeout: float | None = None
-):
+) -> typing.Iterator[int]:
     """Open ``path`` and yield its descriptor under an fcntl record lock.
 
     The lock is exclusive for writers and shared for readers, and is
@@ -44,6 +45,27 @@ def locked_open(
     the file, so nothing else in the process should open these files
     while one is held; the per-path thread lock covers this package's own
     calls.
+
+    Parameters
+    ----------
+    path : str
+        The file to open.
+    flags : int
+        Flags for ``os.open``; a file it creates gets mode 600.
+    exclusive : bool
+        Lock exclusively, to write, rather than shared, to read.
+    timeout : float or None, default None
+        Seconds to wait for the lock; None waits as long as it takes.
+
+    Yields
+    ------
+    int
+        The locked file descriptor.
+
+    Raises
+    ------
+    LockTimeoutError
+        If the lock is not had within ``timeout`` seconds.
     """
     deadline = None if timeout is None else time.monotonic() + timeout
     tlock = _thread_lock(path)

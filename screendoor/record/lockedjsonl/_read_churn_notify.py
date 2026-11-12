@@ -1,10 +1,29 @@
+from __future__ import annotations
+
+import typing
+
 from ._files import path, read_events
 
 
-def read_churn_notify(*, timeout: float | None = None):
-    """Read every event in churn_notify.jsonl, under a shared lock."""
+def read_churn_notify(
+    *, timeout: float | None = None
+) -> typing.Callable[[dict], list[dict]]:
+    """Read every event in churn_notify.jsonl, under a shared lock.
 
-    def read_churn_notify(ctx) -> list:
+    Parameters
+    ----------
+    timeout : float or None, default None
+        Seconds to wait for the lock before raising LockTimeoutError; None
+        waits as long as it takes.
+
+    Returns
+    -------
+    Callable[[dict], list[dict]]
+        The ``how_read_churn_notify`` hook: ``(ctx)`` returns the file's
+        events.
+    """
+
+    def read_churn_notify(ctx: dict) -> list[dict]:
         return read_events(path(ctx, "churn_notify"), timeout)
 
     return read_churn_notify

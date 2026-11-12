@@ -142,7 +142,7 @@ def test_dispatch_recorded_through_locked_hooks(tmp_path):
         ctx.hook_expr("how_write_trial_payloads")
         == LOCKED["how_write_trial_payloads"]
     )
-    telemetry = ctx.hook("how_read_trial_telemetry")(ctx)
+    telemetry = ctx.read_trial_telemetry()
     assert {e["event"] for e in telemetry} == {"started", "telemetry"}
     values = [e["value"] for e in telemetry if e["event"] == "telemetry"]
     assert sorted(values) == [0, 1, 2, 3]

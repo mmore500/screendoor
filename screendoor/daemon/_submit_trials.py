@@ -1,21 +1,42 @@
+from __future__ import annotations
+
 import hashlib
+import typing
 
 from ..auxlib._batch_trials import batch_trials
 from ..auxlib._canonical_json import canonical_json
 
+if typing.TYPE_CHECKING:
+    from ..auxlib._DispatchContext import DispatchContext
 
-def job_name(ctx, entries: list) -> str:
+
+def job_name(ctx: DispatchContext, entries: list[dict]) -> str:
     """The job name for one launch: the dispatch and its trial attempts.
 
     Deterministic, so the name recorded with each trial submission is the
     name the orchestrator gives the job, and poke can find it.
+
+    Parameters
+    ----------
+    ctx : DispatchContext
+        The dispatch launching.
+    entries : list of dict
+        The trial attempts launched, each with ``trial_uuid`` and
+        ``attempt``.
+
+    Returns
+    -------
+    str
+        ``screendoor-<dispatch uuid prefix>-<digest of the attempts>``.
     """
     pairs = sorted((e["trial_uuid"], e["attempt"]) for e in entries)
     digest = hashlib.sha256(canonical_json(pairs).encode()).hexdigest()
     return f"screendoor-{ctx.dispatch_uuid[:8]}-{digest[:12]}"
 
 
-def submit_trials(ctx, entries: list, n_trials: int) -> None:
+def submit_trials(
+    ctx: DispatchContext, entries: list[dict], n_trials: int
+) -> None:
     """Record a ``requested`` submission per entry, then launch them.
 
     Each entry has ``trial_uuid`` and ``attempt`` plus the fields its
@@ -27,6 +48,16 @@ def submit_trials(ctx, entries: list, n_trials: int) -> None:
 
     how_prep_trial_payloads runs before the launch, so that fixed-size
     storage has room for all ``n_trials`` trials.
+
+    Parameters
+    ----------
+    ctx : DispatchContext
+        The dispatch launching.
+    entries : list of dict
+        One per trial attempt: ``trial_uuid`` and ``attempt``, plus the
+        other fields its submission records.
+    n_trials : int
+        How many trials the dispatch will have once these are submitted.
     """
     if not entries:
         return
@@ -41,9 +72,9 @@ def submit_trials(ctx, entries: list, n_trials: int) -> None:
                     "job": {"name": name, "index": index},
                 }
             )
-    ctx.hook("how_prep_trial_payloads")(ctx, n_trials)
-    ctx.hook("how_launch")(
-        ctx,
+    ctx.call_hook("how_prep_trial_payloads", n_trials)
+    ctx.call_hook(
+        "how_launch",
         name,
         [
             [

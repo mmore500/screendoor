@@ -3,7 +3,12 @@ from ....auxlib import canonical_json
 from ..._accepted import accepted
 
 
-def churn(dispatch, trial_submissions, trial_payloads, memo):
+def churn(
+    dispatch: dict,
+    trial_submissions: list[dict],
+    trial_payloads: list[dict],
+    memo: list[dict],
+) -> list[dict]:
     """Pull removable components one at a time, like Jenga blocks.
 
     ``assay_kwargs``: ``components`` (names), ``batch_size`` (removals
@@ -11,6 +16,22 @@ def churn(dispatch, trial_submissions, trial_payloads, memo):
     ``$components``, the kept components less the one removed, and passes
     (the removal is harmless) if it sends ``true`` or ``{"accept": true}``;
     churn raises on a trial with no result.
+
+    Parameters
+    ----------
+    dispatch : dict
+        The dispatch record, with ``assay_kwargs``.
+    trial_submissions : list of dict
+        The dispatch's trial submissions.
+    trial_payloads : list of dict
+        The dispatch's trial payloads.
+    memo : list of dict
+        The memo payloads, oldest first; the last is the search's state.
+
+    Returns
+    -------
+    list of dict
+        This step's actions.
     """
     trials = scd_churn.fold_trials(trial_submissions, trial_payloads)
     kw = dispatch["assay_kwargs"]

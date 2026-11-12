@@ -1,10 +1,28 @@
 from ._validate import check_json, make_action
 
 
-def launch(trials: list) -> dict:
+def launch(trials: list[dict]) -> dict:
     """Request trials, each ``{"key": ..., "cmd": str, "env": {str: str}}``.
 
     ``env`` is optional; names starting ``SCREENDOOR_`` are reserved.
+
+    Parameters
+    ----------
+    trials : list of dict
+        The trials to request; ``key`` is any JSON value.
+
+    Returns
+    -------
+    dict
+        The ``launch`` action.
+
+    Raises
+    ------
+    TypeError
+        If a ``cmd``, or an ``env`` name or value, is not a string.
+    ValueError
+        If a trial has unknown fields, a reserved ``env`` name, or a key
+        that is not JSON-serializable.
     """
     checked = []
     for t in trials:

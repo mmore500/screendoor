@@ -22,6 +22,25 @@ def append(file: str, record: dict, timeout: float | None = None) -> dict:
 
     A last line left unterminated by a writer that died mid-write is ended
     first, so the new line is not spliced onto it.
+
+    Parameters
+    ----------
+    file : str
+        The JSONL file, made if missing.
+    record : dict
+        The record to append.
+    timeout : float or None, default None
+        Seconds to wait for the lock; None waits as long as it takes.
+
+    Returns
+    -------
+    dict
+        ``record`` as stamped.
+
+    Raises
+    ------
+    LockTimeoutError
+        If the lock is not had within ``timeout`` seconds.
     """
     out = stamp(record)
     line = (canonical_json(out) + "\n").encode()
@@ -39,7 +58,27 @@ def append(file: str, record: dict, timeout: float | None = None) -> dict:
 
 
 def read_events(file: str, timeout: float | None = None) -> list[dict]:
-    """Read every whole record, under a shared lock; [] if no file."""
+    """Read every whole record, under a shared lock; [] if no file.
+
+    Parameters
+    ----------
+    file : str
+        The JSONL file.
+    timeout : float or None, default None
+        Seconds to wait for the lock; None waits as long as it takes.
+
+    Returns
+    -------
+    list of dict
+        The records, in file order, skipping torn lines.
+
+    Raises
+    ------
+    LockTimeoutError
+        If the lock is not had within ``timeout`` seconds.
+    SchemaTooNewError
+        If a record's schema is newer than this code understands.
+    """
     try:
         with locked_open(
             file, os.O_RDONLY, exclusive=False, timeout=timeout
