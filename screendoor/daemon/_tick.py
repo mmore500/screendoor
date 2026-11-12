@@ -3,7 +3,7 @@ import traceback
 
 from ..auxlib._DispatchContext import LEVELS
 from ..auxlib._fold_trial_events import fold_trial_events
-from ._apply_actions import apply_actions, churn_step, close
+from ._apply_actions import apply_actions, churn_step, complete
 from ._launch_trials import submit_trials
 from ._notify import flush_batched_notifications, notify
 
@@ -72,10 +72,10 @@ def tick(ctx) -> None:
     gone = ctx.hook("how_poke")(ctx, in_progress) if in_progress else ()
     killed = {t["trial_uuid"] for t in trials if t["status"] == "killed"}
     relaunch(ctx, set(gone) | killed)
-    throttled = not ctx.hook("how_throttle")(ctx)
+    throttled = not ctx.hook("how_throttle_churn")(ctx)
 
     streak = ctx.churn_error_streak
-    while ctx.closed is None:
+    while ctx.completed is None:
         submissions = ctx.read_trial_submissions()
         payloads = ctx.read_trial_payloads()
         if not ctx.hook("how_unblock_churn")(ctx, submissions, payloads):
@@ -99,7 +99,7 @@ def tick(ctx) -> None:
             logging.error(
                 "screendoor: churn raised (%d in a row):\n%s", streak, tb
             )
-            ctx.write_dispatch_payload(
+            ctx.write_dispatch_telemetry(
                 {
                     "event": "churn_error",
                     "streak": streak,
@@ -112,7 +112,7 @@ def tick(ctx) -> None:
                 notify(ctx, "failure", f"churn raised: {e!r}", data)
             if streak > ctx.record["churn_maxretry"]:
                 reason = f"churn raised {streak} consecutive ticks: {e!r}"
-                close(ctx, "failed", reason=reason)
+                complete(ctx, "failed", reason=reason)
                 notify(ctx, "failure", "dispatch failed: churn keeps raising")
             break
         streak = 0
@@ -120,7 +120,7 @@ def tick(ctx) -> None:
             break
     flush_batched_notifications(ctx, LEVELS)
     ctx.churn_error_streak = streak
-    ctx.write_dispatch_payload(
+    ctx.write_dispatch_telemetry(
         {
             "event": "ticked",
             "churn_error_streak": streak,

@@ -12,24 +12,28 @@ def churn_step(memo: list, trial_submissions: list) -> str:
     return f"{len(memo)}:{len(trial_submissions)}"
 
 
-def close(ctx, outcome: str, **fields) -> None:
-    """Record the dispatch closed, with a tally of its trials so far, then
+def complete(ctx, outcome: str, **fields) -> None:
+    """Record the dispatch completed, with a tally of its trials so far, then
     call how_cleanup_success or how_cleanup_failure.
 
     A cleanup that raises is logged and recorded as ``cleanup_error``; the
-    dispatch stays closed.
+    dispatch stays completed.
     """
     trials = ctx.read_trials()
-    ctx.closed = {"outcome": outcome, **fields, "tally": tally_trials(trials)}
+    ctx.completed = {
+        "outcome": outcome,
+        **fields,
+        "tally": tally_trials(trials),
+    }
     ctx.write_dispatch_payload(
-        {"event": "closed", **ctx.closed},
+        {"event": "completed", **ctx.completed},
     )
     which = "success" if outcome == "succeeded" else "failure"
     try:
-        ctx.hook(f"how_cleanup_{which}")(ctx, ctx.closed)
+        ctx.hook(f"how_cleanup_{which}")(ctx, ctx.completed)
     except Exception as e:
         logging.exception("screendoor: how_cleanup_%s raised", which)
-        ctx.write_dispatch_payload(
+        ctx.write_dispatch_telemetry(
             {"event": "cleanup_error", "hook": which, "error": repr(e)},
         )
 
@@ -99,10 +103,10 @@ def apply_actions(
             notify(ctx, "eta", f"eta {kw['eta']}", kw)
         elif kind in ("warning", "anomaly"):
             notify(ctx, kind, kw["message"], kw)
-        elif kind == "succeed" and ctx.closed is None:
-            close(ctx, "succeeded", summary=kw["summary"])
+        elif kind == "succeed" and ctx.completed is None:
+            complete(ctx, "succeeded", summary=kw["summary"])
             notify(ctx, "success", "dispatch succeeded", kw)
-        elif kind == "fail" and ctx.closed is None:
-            close(ctx, "failed", reason=kw["reason"])
+        elif kind == "fail" and ctx.completed is None:
+            complete(ctx, "failed", reason=kw["reason"])
             notify(ctx, "failure", f"dispatch failed: {kw['reason']}", kw)
     return bool(memos)

@@ -10,8 +10,8 @@ def resume_dispatch(workdir: str, dispatch_uuids: list | None = None) -> list:
     done = []
     for ctx in load_dispatches(workdir):
         wanted = not dispatch_uuids or ctx.dispatch_uuid in dispatch_uuids
-        if ctx.killed and not ctx.closed and wanted:
-            ctx.write_dispatch_payload(
+        if ctx.killed and not ctx.completed and wanted:
+            ctx.write_dispatch_telemetry(
                 {
                     "event": "resumed",
                 },

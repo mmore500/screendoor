@@ -6,7 +6,7 @@ Usage: avida_fitness.py SEQUENCE   (or set $sequence)
 Knocked-out sites are already replaced by nop-X ("A"); this script appends
 ``INST nop-X`` to instset-heads.cfg so that symbol exists. Prints
 
-  !!!screendoor:result {"score": fitness, "viable": ..., "tasks": [...], ...}
+  !!!screendoor:payload {"score": fitness, "viable": ..., "tasks": [...], ...}
 
 Environment: AVIDA_BINARY (path to avida), AVIDA_CONFIG_DIR (avida-core/
 support/config). Standard library only.
@@ -89,7 +89,7 @@ def main() -> int:
     binary = os.environ.get("AVIDA_BINARY") or shutil.which("avida")
     config_dir = os.environ["AVIDA_CONFIG_DIR"]
     result = analyze(seq, binary, config_dir)
-    print("!!!screendoor:result " + json.dumps(result), flush=True)
+    print("!!!screendoor:payload " + json.dumps(result), flush=True)
     return 0
 
 

@@ -2,7 +2,7 @@ import hashlib
 import json
 import os
 
-DEFAULT_SLOT = 4096
+DEFAULT_SLOT = 32768  # bytes: eight 4096-byte pages
 
 
 class SlotError(Exception):

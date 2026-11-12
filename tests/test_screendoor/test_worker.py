@@ -27,8 +27,8 @@ def test_tags_and_channels():
         "echo '!!!screendoor:telemetry {\"e\": 1}'\n"
         "echo '!!!screendoor:telemetry {\"e\": 2}' >&2\n"
         "echo '!!!screendoor:custom [1,2]'\n"
-        "echo '!!!screendoor:result 1'\n"
-        "echo '!!!screendoor:result {\"final\": true}'\n"
+        "echo '!!!screendoor:payload 1'\n"
+        "echo '!!!screendoor:payload {\"final\": true}'\n"
     )
     assert t["status"] == "succeeded"
     assert t["result"] == {"final": True}  # last one wins
@@ -49,8 +49,8 @@ def test_tags_and_channels():
 def test_malformed_lines_go_to_telemetry():
     t, ctx = run(
         "echo '!!!screendoor:telemetry {nope'\n"
-        "echo '!!!screendoor:result {nope'\n"
-        "echo '!!!screendoor:result 7'\n"
+        "echo '!!!screendoor:payload {nope'\n"
+        "echo '!!!screendoor:payload 7'\n"
     )
     assert (t["status"], t["result"], t["malformed"]) == ("succeeded", 7, 2)
     events = [
@@ -59,11 +59,11 @@ def test_malformed_lines_go_to_telemetry():
         if e["event"] != "started"
     ]
     assert [e["event"] for e in events] == ["malformed", "malformed"]
-    assert [e["channel"] for e in events] == ["telemetry", "result"]
+    assert [e["channel"] for e in events] == ["telemetry", "payload"]
 
 
 def test_no_result_is_null():
-    for cmd in ("echo hi", "echo '!!!screendoor:result {nope'"):
+    for cmd in ("echo hi", "echo '!!!screendoor:payload {nope'"):
         t, _ = run(cmd)
         assert (t["status"], t["result"], t["error"]) == (
             "succeeded",
@@ -77,12 +77,12 @@ def test_error_kinds():
     assert t["status"] == "failed"
     assert t["error"]["kind"] == "error" and t["error"]["exit_code"] == 3
     assert "oops" in t["error"]["stderr_tail"]
-    t, _ = run("echo '!!!screendoor:result 1'; false")
+    t, _ = run("echo '!!!screendoor:payload 1'; false")
     assert t["error"]["kind"] == "error"
 
 
 def test_trial_dir_layout():
-    t, ctx = run("echo '!!!screendoor:result 1'; echo out; echo err >&2")
+    t, ctx = run("echo '!!!screendoor:payload 1'; echo out; echo err >&2")
 
     def read(*parts):
         with open(os.path.join(ctx.trial_dir(t["trial_uuid"]), *parts)) as fh:
@@ -96,7 +96,7 @@ def test_trial_dir_layout():
 def test_script_runs_in_a_temporary_directory():
     t, ctx = run(
         'pwd > "$SCREENDOOR_TRIAL_DIR/cwd"; touch scratch-file; '
-        "echo '!!!screendoor:result 1'"
+        "echo '!!!screendoor:payload 1'"
     )
     trial_dir = ctx.trial_dir(t["trial_uuid"])
     with open(os.path.join(trial_dir, "cwd")) as fh:
@@ -109,10 +109,10 @@ def test_script_runs_in_a_temporary_directory():
 def test_success_archives_then_clears_trials(tmp_path):
     r = simulate_dispatch(
         "scd.assaylib.testing.exercise",
-        {"n": 2, "cmd": "echo out; echo '!!!screendoor:result 1'"},
+        {"n": 2, "cmd": "echo out; echo '!!!screendoor:payload 1'"},
         workdir=str(tmp_path),
     )
-    assert r["closed"]["outcome"] == "succeeded"
+    assert r["completed"]["outcome"] == "succeeded"
     (ctx,) = load_dispatches(r["workdir"])
     assert not os.path.exists(os.path.join(ctx.run_dir, "trials"))
     with tarfile.open(os.path.join(ctx.run_dir, "trials.tar.gz")) as archive:
@@ -127,7 +127,7 @@ def test_failure_keeps_trials_by_default(tmp_path):
         {"n": 1, "cmd": "exit 1"},
         workdir=str(tmp_path),
     )
-    assert r["closed"]["outcome"] == "failed"
+    assert r["completed"]["outcome"] == "failed"
     (ctx,) = load_dispatches(r["workdir"])
     assert os.path.isdir(os.path.join(ctx.run_dir, "trials"))
     assert not os.path.exists(os.path.join(ctx.run_dir, "trials.tar.gz"))
@@ -141,8 +141,8 @@ def test_cleanup_error_is_recorded_not_raised(tmp_path):
         workdir=str(tmp_path),
         how_cleanup_success="lambda *args, **kwargs: 1 / 0",
     )
-    assert r["closed"]["outcome"] == "succeeded"
+    assert r["completed"]["outcome"] == "succeeded"
     (ctx,) = load_dispatches(r["workdir"])
-    events = ctx.wdhooks.read_dispatch_payloads(r["workdir"])
+    events = ctx.wdhooks.read_dispatch_telemetry(r["workdir"])
     (e,) = [e for e in events if e["event"] == "cleanup_error"]
     assert e["hook"] == "success" and "ZeroDivisionError" in e["error"]

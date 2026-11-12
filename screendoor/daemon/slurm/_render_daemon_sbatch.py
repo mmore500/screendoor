@@ -19,12 +19,15 @@ def render_daemon_sbatch(
     script_dir: str = "~/slurmscripts",
     log_dir: str = "~/slurmlogs",
 ) -> str:
-    """Render one daemon job: queue the successor first, then tick once."""
+    """Render one daemon job: queue the successor first, then tick once.
+
+    The successor is timed by its own ``--begin``, not by waiting for
+    this job to end.
+    """
     wd = shlex.quote(os.path.abspath(workdir))
     lines = [
         "#!/bin/bash",
         f"#SBATCH --job-name={chain_job_name(workdir)}",
-        "#SBATCH --dependency=singleton",
         "#SBATCH --signal=B:USR1@300",
         "#SBATCH --output=/dev/null",
         "set -uo pipefail",

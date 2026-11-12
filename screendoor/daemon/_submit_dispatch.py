@@ -3,10 +3,12 @@ import secrets
 import uuid
 
 from ..auxlib._DispatchContext import (
-    HOOK_DEFAULTS,
+    HOOK_NAMES,
     NAMES,
     SEED_NAME,
+    MissingHookError,
     WorkdirHooks,
+    missing_hooks,
 )
 from ..auxlib._next_cron_firing import parse_cron
 
@@ -32,10 +34,13 @@ def validate_dispatch(obj: dict) -> None:
         if key not in obj:
             raise ValueError(f"dispatch needs {key!r}")
     parse_cron(obj["schedule"])
+    missing = missing_hooks(HOOK_NAMES, obj)
+    if missing:  # no hook has a default
+        raise MissingHookError("dispatch must set " + ", ".join(missing))
     for key, value in obj.items():
-        if key not in SETTINGS and key not in HOOK_DEFAULTS:
+        if key not in SETTINGS and key not in HOOK_NAMES:
             raise ValueError(f"unknown dispatch key {key!r}")
-        if key in HOOK_DEFAULTS and not isinstance(value, str):
+        if key in HOOK_NAMES and not isinstance(value, str):
             raise ValueError(f"{key} must be an expression string")
     for key in NAMES:
         if not isinstance(obj.get(key, ""), str):

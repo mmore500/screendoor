@@ -4,8 +4,8 @@ from ._run_tick_once import next_firing
 
 
 def _state(ctx) -> str:
-    if ctx.closed:
-        return ctx.closed["outcome"]
+    if ctx.completed:
+        return ctx.completed["outcome"]
     return "killed" if ctx.killed else "open"
 
 
@@ -40,11 +40,11 @@ def print_status(workdir: str, *, file=None, max_failures: int = 3) -> list:
             "churn_error_streak": ctx.churn_error_streak,
             "churn_error": ctx.churn_error,
         }
-        if ctx.closed:
-            row["closed"] = {
-                k: ctx.closed[k]
+        if ctx.completed:
+            row["completed"] = {
+                k: ctx.completed[k]
                 for k in ("summary", "reason")
-                if k in ctx.closed
+                if k in ctx.completed
             }
         rows.append(row)
 
@@ -74,15 +74,15 @@ def print_status(workdir: str, *, file=None, max_failures: int = 3) -> list:
                 f"    last tick: {row['last_tick'] or 'never'}{note}; "
                 f"next: {row['next_tick']}"
             )
-        elif ctx.killed and not ctx.closed:
+        elif ctx.killed and not ctx.completed:
             lines.append("    killed: resume with resume_dispatch")
         if ctx.churn_error_streak:
             lines.append(
                 f"    churn raised {ctx.churn_error_streak} ticks in a row: "
                 f"{ctx.churn_error}"[:200]
             )
-        if ctx.closed:
-            lines.append(f"    closed: {row['closed']}"[:500])
+        if ctx.completed:
+            lines.append(f"    completed: {row['completed']}"[:500])
         lines.append(f"    run_dir: {ctx.run_dir}")
         print(*lines, sep="\n", file=file)
     return rows

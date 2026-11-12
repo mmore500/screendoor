@@ -11,7 +11,12 @@ from screendoor.daemon import (
     run_tick_once,
     submit_dispatch,
 )
-from screendoor.testing import register_hook, simulate_dispatch
+from screendoor.testing import (
+    INLINE_HOOKS,
+    register_hook,
+    simulate_dispatch,
+    write_workdir_hooks,
+)
 
 EXERCISE = "scd.assaylib.testing.exercise"
 
@@ -22,8 +27,8 @@ def submit(workdir, assay, *, fake_trial=None, **settings):
     dispatch = {
         "assay": assay if isinstance(assay, str) else register_hook(assay),
         "schedule": "* * * * *",
+        **INLINE_HOOKS,
         "how_launch": f"scd.orch.inline.launch(fake_trial={fake})",
-        "how_poke": "scd.orch.inline.poke()",
         **settings,
     }
     return submit_dispatch(dispatch, workdir)
@@ -31,12 +36,17 @@ def submit(workdir, assay, *, fake_trial=None, **settings):
 
 def dispatch_events(workdir, event):
     (ctx,) = load_dispatches(workdir)
-    events = ctx.wdhooks.read_dispatch_payloads(workdir)
+    events = [
+        *ctx.wdhooks.read_dispatch_payloads(workdir),
+        *ctx.wdhooks.read_dispatch_telemetry(workdir),
+    ]
     return [e for e in events if e["event"] == event]
 
 
 def test_submit_fills_uuid_and_seed(workdir, clock):
-    uid = submit_dispatch({"assay": "x", "schedule": "*/5 * * * *"}, workdir)
+    uid = submit_dispatch(
+        {"assay": "x", "schedule": "*/5 * * * *", **INLINE_HOOKS}, workdir
+    )
     (ctx,) = load_dispatches(workdir)
     assert ctx.dispatch_uuid == uid
     assert 0 <= ctx.record["meta_seed"] < 2**32
@@ -50,9 +60,19 @@ def test_submit_fills_uuid_and_seed(workdir, clock):
         {"schedule": "* * * * *"},
         {"assay": "x"},
         {"assay": "x", "schedule": "* * *"},
-        {"assay": "x", "schedule": "* * * * *", "how_nope": "1"},
-        {"assay": "x", "schedule": "* * * * *", "typo_key": 1},
-        {"assay": "x", "schedule": "* * * * *", "trial_batchsize": 0},
+        {
+            "assay": "x",
+            "schedule": "* * * * *",
+            **INLINE_HOOKS,
+            "how_nope": "1",
+        },
+        {"assay": "x", "schedule": "* * * * *", **INLINE_HOOKS, "typo_key": 1},
+        {
+            "assay": "x",
+            "schedule": "* * * * *",
+            **INLINE_HOOKS,
+            "trial_batchsize": 0,
+        },
     ],
 )
 def test_submit_rejects_bad(workdir, bad):
@@ -84,9 +104,9 @@ def test_throttle_drops_launch_and_memo(workdir, clock):
         workdir=workdir,
         fake_trial=lambda t: 1,
         max_ticks=3,
-        how_throttle=register_hook(lambda ctx: False),
+        how_throttle_churn=register_hook(lambda ctx: False),
     )
-    assert r["closed"] is None and r["trials"] == []
+    assert r["completed"] is None and r["trials"] == []
 
 
 def test_relaunch_then_lost(workdir, clock):
@@ -106,7 +126,7 @@ def test_relaunch_then_lost(workdir, clock):
     (t,) = ctx.read_trials()
     assert t["status"] == "failed" and t["error"]["kind"] == "lost"
     assert t["attempt"] == 2
-    assert ctx.closed["outcome"] == "failed"
+    assert ctx.completed["outcome"] == "failed"
 
 
 def test_kill_pauses_and_resume_relaunches_for_free(workdir, clock):
@@ -129,7 +149,7 @@ def test_kill_pauses_and_resume_relaunches_for_free(workdir, clock):
     assert [(t["attempt"], t["job"]["index"]) for t in cancelled] == [(0, 0)]
     (ctx,) = load_dispatches(workdir)
     (t,) = ctx.read_trials()
-    assert ctx.killed and ctx.closed is None  # paused, not failed
+    assert ctx.killed and ctx.completed is None  # paused, not failed
     assert (t["status"], t["kills"]) == ("killed", 1)
     assert run_tick_once(workdir, force=True) == []  # nothing active
     assert len(dispatch_events(workdir, "ticked")) == 1
@@ -160,10 +180,10 @@ def test_churn_errors_retry_then_fail(workdir, clock):
         run_tick_once(workdir, force=True)
     (ctx,) = load_dispatches(workdir)
     assert len(calls) == 3  # the first failure, then 2 retries
-    assert ctx.closed["outcome"] == "failed"
+    assert ctx.completed["outcome"] == "failed"
     assert len(dispatch_events(workdir, "churn_error")) == 3
     notes = ctx.hook("how_read_notify")(ctx)
-    # one deduplicated churn error, then the close
+    # one deduplicated churn error, then the completion
     assert sum(n["level"] == "failure" for n in notes) == 2
 
 
@@ -180,7 +200,7 @@ def test_churn_error_streak_resets(workdir, clock):
     for _ in range(7):
         run_tick_once(workdir, force=True)
     (ctx,) = load_dispatches(workdir)
-    assert ctx.closed["outcome"] == "succeeded"
+    assert ctx.completed["outcome"] == "succeeded"
 
 
 def test_duplicate_requests_dropped(clock, caplog):
@@ -203,7 +223,7 @@ def test_memo_loop_same_tick(workdir, clock):
 
     simulate_dispatch(churn, workdir=workdir, max_ticks=1)
     (ctx,) = load_dispatches(workdir)
-    assert ctx.closed["summary"] == {"memos": 3}
+    assert ctx.completed["summary"] == {"memos": 3}
     memos = ctx.hook("how_read_memo")(ctx, raw=True)
     # each memo names the churn call that made it
     assert [m["churn_step"] for m in memos] == ["0:0", "1:0", "2:0"]
@@ -211,7 +231,7 @@ def test_memo_loop_same_tick(workdir, clock):
 
 def test_trial_env(clock):
     cmd = (
-        'echo "!!!screendoor:result '
+        'echo "!!!screendoor:payload '
         '\\"${SCREENDOOR_SEED-unset} $i $(basename $SCREENDOOR_TRIAL_DIR)\\""'
     )
     r = simulate_dispatch(EXERCISE, {"n": 2, "cmd": cmd})
@@ -224,11 +244,11 @@ def test_trial_env(clock):
 
 def test_every_record_carries_the_dispatch_labels(tmp_path, clock):
     r = simulate_dispatch(
-        "scd.assaylib.skeletonize.naive_jenga",
+        "scd.assaylib.skeletonization.naive_jenga",
         {
             "components": list("abc"),
             "cmd": "echo '!!!screendoor:telemetry 1'\n"
-            "echo '!!!screendoor:result {\"passes\": false}'",
+            "echo '!!!screendoor:payload {\"passes\": false}'",
         },
         workdir=str(tmp_path),
         clock=clock,
@@ -247,6 +267,7 @@ def test_every_record_carries_the_dispatch_labels(tmp_path, clock):
     assert set(files) == {
         "dispatch_submissions.jsonl",
         "dispatch_payloads.jsonl",
+        "dispatch_telemetry.jsonl",
         "screendoor-notify.jsonl",  # the daemon's own, of no dispatch
         "trial_submissions.jsonl",
         "trial_payloads.jsonl",
@@ -264,7 +285,12 @@ def test_every_record_carries_the_dispatch_labels(tmp_path, clock):
 
 
 def test_submit_rejects_bad_names(workdir):
-    bad = {"assay": "x", "schedule": "* * * * *", "meta_project": 3}
+    bad = {
+        "assay": "x",
+        "schedule": "* * * * *",
+        **INLINE_HOOKS,
+        "meta_project": 3,
+    }
     with pytest.raises(ValueError, match="meta_project"):
         submit_dispatch(bad, workdir)
 
@@ -277,8 +303,9 @@ def test_daemon_liveness_and_termination_hooks(tmp_path, clock):
         return [{"event": "sent"}]
 
     hook = register_hook(notifier)
-    config = {"how_notify_liveness": hook, "how_notify_termination": hook}
-    (tmp_path / "screendoor.json").write_text(json.dumps(config))
+    write_workdir_hooks(
+        str(tmp_path), how_notify_liveness=hook, how_notify_termination=hook
+    )
     simulate_dispatch(EXERCISE, {"n": 1}, workdir=str(tmp_path), clock=clock)
     levels = [level for level, _ in seen]
     assert set(levels[:-1]) == {"liveness"} and len(levels) >= 3
@@ -304,10 +331,37 @@ def test_status_and_setup_records(workdir, clock, capsys):
     assert row["trials"] == {"succeeded": 2}
     assert row["tally"]["retries"] == 0 and row["failures"] == []
     assert "retries 0, kills 0" in capsys.readouterr().out
-    (closed,) = dispatch_events(workdir, "closed")
-    assert closed["tally"] == row["tally"]
+    (completed,) = dispatch_events(workdir, "completed")
+    assert completed["tally"] == row["tally"]
     (setup,) = dispatch_events(workdir, "setup")
     launch = setup["hooks"]["how_launch"]
     assert launch["expr"].startswith("scd.orch.inline")
     assert "python_version" in setup
     assert json.loads(json.dumps(setup)) == setup
+
+
+def test_every_hook_must_be_supplied(workdir):
+    from screendoor.auxlib._DispatchContext import MissingHookError
+
+    partial = {k: v for k, v in INLINE_HOOKS.items() if k != "how_poke"}
+    bad = {"assay": "x", "schedule": "* * * * *", **partial}
+    del bad["how_cleanup_failure"]
+    with pytest.raises(MissingHookError) as e:
+        submit_dispatch(bad, workdir)
+    assert "how_poke" in str(e.value) and "how_cleanup_failure" in str(e.value)
+
+
+def test_workdir_hooks_must_be_supplied(tmp_path):
+    from screendoor.auxlib._DispatchContext import MissingHookError
+
+    ok = {"assay": "x", "schedule": "* * * * *", **INLINE_HOOKS}
+    with pytest.raises(MissingHookError, match="screendoor.json is missing"):
+        submit_dispatch(ok, str(tmp_path))
+    path = write_workdir_hooks(str(tmp_path))
+    with open(path) as fh:
+        config = json.load(fh)
+    del config["how_log_info"]
+    with open(path, "w") as fh:
+        json.dump(config, fh)
+    with pytest.raises(MissingHookError, match="must set how_log_info"):
+        load_dispatches(str(tmp_path))

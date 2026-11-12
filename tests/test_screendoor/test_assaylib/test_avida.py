@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from screendoor.assaylib.skeletonize._engine._codec import decode_sites
+from screendoor.assaylib.skeletonization._engine._codec import decode_sites
 from screendoor.testing import simulate_dispatch
 
 REPO = os.path.dirname(
@@ -51,8 +51,8 @@ def run(organism, policy, seed=42):
 @pytest.mark.parametrize("organism", sorted(EXPECTED))
 def test_known_skeletons(organism, policy):
     r = run(organism, policy)
-    assert r["closed"]["outcome"] == "succeeded", r["closed"]
-    s = r["closed"]["summary"]
+    assert r["completed"]["outcome"] == "succeeded", r["completed"]
+    s = r["completed"]["summary"]
     assert s["certified"]
     assert s["skeleton"] == EXPECTED[organism]
 
@@ -81,7 +81,7 @@ def test_matches_original_on_avida(organism, policy):
         )
     )
     r = run(organism, policy)
-    s = r["closed"]["summary"]
+    s = r["completed"]["summary"]
     assert decode_sites(s["retained"]) == ref.retained
     assert s["proposal_batches"] == ref.proposal_batches
     assert s["skeleton"] == oracle.organism.to_sequence(ref.retained)

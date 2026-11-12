@@ -19,8 +19,8 @@ def test_import_screendoor_is_lazy():
 
 def test_attribute_chain():
     assert callable(scd.orch.slurm.launch)
-    assert callable(scd.assaylib.skeletonize.hybrid.churn)
-    assert "hybrid" in dir(scd.assaylib.skeletonize)
+    assert callable(scd.assaylib.skeletonization.hybrid.churn)
+    assert "hybrid" in dir(scd.assaylib.skeletonization)
     assert scd.auxlib.canonical_json({"b": 1, "a": 2}) == '{"a":2,"b":1}'
 
 

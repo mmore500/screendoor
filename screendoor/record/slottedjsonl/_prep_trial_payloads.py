@@ -12,7 +12,7 @@ def prep_trial_payloads(*, slot_bytes: int | None = None):
     exists before the worker starts. ``slot_bytes`` is the slot size in bytes,
     a multiple of 4096; it is fixed when the file is made, and read and
     write hooks left at ``slot_bytes=None`` take it from the file. None makes
-    a new file with DEFAULT_SLOT (4096).
+    a new file with DEFAULT_SLOT (32768).
     """
 
     def prep_trial_payloads(ctx, n_trials: int) -> None:

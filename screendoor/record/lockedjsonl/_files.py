@@ -10,6 +10,9 @@ from ..appendjsonl._files import (
 from ..appendjsonl._files import (
     DISPATCH_SUBMISSIONS_FILE as DISPATCH_SUBMISSIONS_FILE,
 )
+from ..appendjsonl._files import (
+    DISPATCH_TELEMETRY_FILE as DISPATCH_TELEMETRY_FILE,
+)
 from ..appendjsonl._files import path as path
 from ._locked_open import locked_open
 

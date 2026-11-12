@@ -28,11 +28,17 @@ def submit_daemon(
     Run this after submitting or resuming a dispatch: neither starts a
     daemon.
 
+    The job is timed by ``--begin``: the earliest time an active dispatch
+    is due. A ``successor``, queued by a daemon job before it ticks, begins
+    when a dispatch is next due after that tick. Daemon jobs do not wait
+    on each other; one that starts while another is ticking finds the
+    workdir lock held, skips its tick, and still queues its successor.
+
     Returns None, queueing nothing, when no dispatch is active or (unless
     ``successor``) a daemon job is already queued; that job is pulled
     forward instead.
     """
-    begin = earliest_begin(workdir)
+    begin = earliest_begin(workdir, successor=successor)
     if begin is None:
         logging.info("screendoor: no active dispatch; daemon chain ends")
         if successor:

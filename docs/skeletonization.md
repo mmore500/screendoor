@@ -1,6 +1,6 @@
 # Knockout skeletonization assays
 
-`scd.assaylib.skeletonize.{ddmin,minesweeper,hybrid}` sample a
+`scd.assaylib.skeletonization.{ddmin,minesweeper,hybrid}` sample a
 fitness-acceptable, single-deletion-minimal *skeleton* of a genome by
 knocking out sites. They port the policies of the 2026-11-03
 `knockout_skeleton` package (`search.py`, exact-oracle mode) to screendoor:

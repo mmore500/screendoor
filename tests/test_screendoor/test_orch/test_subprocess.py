@@ -11,6 +11,7 @@ from screendoor.daemon import (
     submit_dispatch,
 )
 from screendoor.orch.subprocess._procs import is_alive, pidfile
+from screendoor.testing import INLINE_HOOKS
 
 
 def _until_closed(workdir, timeout=60):
@@ -19,7 +20,7 @@ def _until_closed(workdir, timeout=60):
         if not run_tick_once(workdir, force=True):
             return load_dispatches(workdir)[0]
         time.sleep(0.2)
-    raise AssertionError("dispatch never closed")
+    raise AssertionError("dispatch never completed")
 
 
 def test_subprocess_end_to_end(workdir):
@@ -28,20 +29,21 @@ def test_subprocess_end_to_end(workdir):
             "assay": "scd.assaylib.testing.exercise",
             "assay_kwargs": {
                 "n": 5,
-                "cmd": 'sleep 0.2; echo "!!!screendoor:result $i"',
+                "cmd": 'sleep 0.2; echo "!!!screendoor:payload $i"',
             },
             "schedule": "* * * * *",
+            **INLINE_HOOKS,
             "trial_batchsize": 2,
             "trial_batch_timeout": 30,
             "how_launch": "scd.orch.subprocess.launch()",
             "how_poke": "scd.orch.subprocess.poke()",
-            "how_throttle": "scd.orch.subprocess.throttle(max_procs=4)",
+            "how_throttle_churn": "scd.orch.subprocess.throttle(max_procs=4)",
         },
         workdir,
     )
     ctx = _until_closed(workdir)
-    assert ctx.closed["outcome"] == "succeeded"
-    res = [o["result"] for o in ctx.closed["summary"]["outcomes"]]
+    assert ctx.completed["outcome"] == "succeeded"
+    res = [o["result"] for o in ctx.completed["summary"]["outcomes"]]
     assert res == [0, 1, 2, 3, 4]
     jobs = {(t["job"]["name"], t["job"]["index"]) for t in ctx.read_trials()}
     assert len(jobs) == 3  # 5 trials in batches of 2
@@ -53,6 +55,7 @@ def test_subprocess_timeout_relaunch_then_lost(workdir):
             "assay": "scd.assaylib.testing.exercise",
             "assay_kwargs": {"n": 1, "cmd": "sleep 30"},
             "schedule": "* * * * *",
+            **INLINE_HOOKS,
             "trial_batch_timeout": 1,
             "trial_maxretry": 1,
             "how_launch": "scd.orch.subprocess.launch()",
@@ -76,8 +79,9 @@ def test_running_jobs_survive_a_daemon_crash(workdir, monkeypatch):
     submit_dispatch(
         {
             "assay": "scd.assaylib.testing.exercise",
-            "assay_kwargs": {"n": 2, "cmd": 'echo "!!!screendoor:result 1"'},
+            "assay_kwargs": {"n": 2, "cmd": 'echo "!!!screendoor:payload 1"'},
             "schedule": "* * * * *",
+            **INLINE_HOOKS,
             "how_launch": "scd.orch.subprocess.launch()",
             "how_poke": "scd.orch.subprocess.poke()",
         },
@@ -88,7 +92,7 @@ def test_running_jobs_survive_a_daemon_crash(workdir, monkeypatch):
         with pytest.raises(KeyboardInterrupt):
             run_tick_once(workdir, force=True)
     ctx = _until_closed(workdir)
-    assert ctx.closed["outcome"] == "succeeded"
+    assert ctx.completed["outcome"] == "succeeded"
     trials = ctx.read_trials()
     assert all(t["attempt"] == 0 for t in trials)  # poke found them alive
     assert len(os.listdir(os.path.join(ctx.run_dir, "jobs"))) == 1
@@ -103,6 +107,7 @@ def test_kill_stops_the_trial_processes(workdir):
                 "cmd": 'echo $$ > "$SCREENDOOR_TRIAL_DIR/pid"; sleep 60',
             },
             "schedule": "* * * * *",
+            **INLINE_HOOKS,
             "trial_batch_timeout": 120,
             "how_launch": "scd.orch.subprocess.launch()",
             "how_poke": "scd.orch.subprocess.poke()",

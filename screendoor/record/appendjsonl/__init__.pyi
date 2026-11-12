@@ -5,6 +5,9 @@ from ._read_dispatch_payloads import (
 from ._read_dispatch_submissions import (
     read_dispatch_submissions as read_dispatch_submissions,
 )
+from ._read_dispatch_telemetry import (
+    read_dispatch_telemetry as read_dispatch_telemetry,
+)
 from ._read_memo import read_memo as read_memo
 from ._read_notify import read_notify as read_notify
 from ._read_trial_payloads import read_trial_payloads as read_trial_payloads
@@ -18,6 +21,9 @@ from ._write_dispatch_payloads import (
 )
 from ._write_dispatch_submissions import (
     write_dispatch_submissions as write_dispatch_submissions,
+)
+from ._write_dispatch_telemetry import (
+    write_dispatch_telemetry as write_dispatch_telemetry,
 )
 from ._write_memo import write_memo as write_memo
 from ._write_notify import write_notify as write_notify

@@ -10,7 +10,7 @@ import pytest
 from screendoor.auxlib._DispatchContext import load_dispatches
 from screendoor.record import lockedjsonl as lj
 from screendoor.record.lockedjsonl._files import append, read_events
-from screendoor.testing import simulate_dispatch
+from screendoor.testing import simulate_dispatch, write_workdir_hooks
 
 
 def _hold_lock(path, ready, release):
@@ -116,27 +116,26 @@ LOCKED = {
 
 
 def test_dispatch_recorded_through_locked_hooks(tmp_path):
-    with open(tmp_path / "screendoor.json", "w") as fh:
-        json.dump(
-            {
-                f"how_{op}_dispatch_{f}": f"scd.record.lockedjsonl."
-                f"{op}_dispatch_{f}()"
-                for op in ("read", "write")
-                for f in ("submissions", "payloads")
-            },
-            fh,
-        )
+    write_workdir_hooks(
+        str(tmp_path),
+        **{
+            f"how_{op}_dispatch_{f}": f"scd.record.lockedjsonl."
+            f"{op}_dispatch_{f}()"
+            for op in ("read", "write")
+            for f in ("submissions", "payloads", "telemetry")
+        },
+    )
     r = simulate_dispatch(
         "scd.assaylib.testing.exercise",
         {
             "n": 4,
             "cmd": 'echo "!!!screendoor:telemetry $i"; '
-            'echo "!!!screendoor:result $((i + 1))"',
+            'echo "!!!screendoor:payload $((i + 1))"',
         },
         workdir=str(tmp_path),
         **LOCKED,
     )
-    assert r["closed"]["outcome"] == "succeeded"
+    assert r["completed"]["outcome"] == "succeeded"
     assert [t["result"] for t in r["trials"]] == [1, 2, 3, 4]
     (ctx,) = load_dispatches(str(tmp_path))
     assert (

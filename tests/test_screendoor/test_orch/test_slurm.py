@@ -1,5 +1,6 @@
 """Slurm hooks against recorded command output (no cluster needed)."""
 
+import datetime
 import re
 
 import pytest
@@ -8,6 +9,7 @@ from screendoor.auxlib._DispatchContext import load_dispatches
 from screendoor.auxlib._default_python_command import (
     default_python_command,
 )
+from screendoor.auxlib._now_iso import now
 from screendoor.daemon import (
     kill_dispatch,
     resume_dispatch,
@@ -19,7 +21,9 @@ from screendoor.daemon.slurm import (
     render_daemon_sbatch,
     submit_daemon,
 )
+from screendoor.daemon.slurm._requeue_successor import slurm_time
 from screendoor.orch.slurm import _run_slurm_command as rsc
+from screendoor.testing import INLINE_HOOKS
 
 
 class FakeSlurm:
@@ -91,12 +95,14 @@ def _submit(workdir, **kw):
             "assay": "scd.assaylib.testing.exercise",
             "assay_kwargs": {"n": 5},
             "schedule": "* * * * *",
+            **INLINE_HOOKS,
+            "how_kill": "scd.orch.slurm.kill()",
             "trial_batchsize": 2,
             "trial_batch_timeout": 3600,
             "how_launch": "scd.orch.slurm.launch(sbatch_flags="
             "'--partition=standard --mem=8G')",
             "how_poke": "scd.orch.slurm.poke()",
-            "how_throttle": "scd.orch.slurm.throttle(max_jobs=500)",
+            "how_throttle_churn": "scd.orch.slurm.throttle(max_jobs=500)",
             **kw,
         },
         workdir,
@@ -152,7 +158,7 @@ def test_one_squeue_per_tick_and_relaunch(workdir, clock, slurm):
 
 def test_throttle(workdir, clock, slurm):
     slurm.queue.update({f"9_{i}": ("other", i) for i in range(3)})
-    _submit(workdir, how_throttle="scd.orch.slurm.throttle(max_jobs=3)")
+    _submit(workdir, how_throttle_churn="scd.orch.slurm.throttle(max_jobs=3)")
     run_tick_once(workdir)
     assert slurm.count("sbatch") == 0
 
@@ -194,15 +200,15 @@ def test_kill_cancels_jobs_and_resume_relaunches(workdir, clock, slurm):
 
 
 def test_positional_hook_call_fails_at_setup(workdir, clock, slurm):
-    _submit(workdir, how_throttle="scd.orch.slurm.throttle(5)")
+    _submit(workdir, how_throttle_churn="scd.orch.slurm.throttle(5)")
     run_tick_once(workdir)
     (ctx,) = load_dispatches(workdir)
     (setup,) = [
         e
-        for e in ctx.wdhooks.read_dispatch_payloads(workdir)
+        for e in ctx.wdhooks.read_dispatch_telemetry(workdir)
         if e["event"] == "setup"
     ]
-    assert "error" in setup["hooks"]["how_throttle"]
+    assert "error" in setup["hooks"]["how_throttle_churn"]
 
 
 def test_daemon_chain(workdir, clock, slurm):
@@ -211,8 +217,8 @@ def test_daemon_chain(workdir, clock, slurm):
     jid = submit_daemon(workdir, sbatch_flags="--partition=x")
     assert jid == "1000"
     script = slurm.scripts[1000]
+    assert "--dependency" not in script  # timed by --begin alone
     for needle in (
-        "--dependency=singleton",
         "--signal=B:USR1@300",
         "screendoor-daemon-",
         "submit_daemon --successor",
@@ -223,7 +229,25 @@ def test_daemon_chain(workdir, clock, slurm):
         workdir, python=default_python_command(), sbatch_flags="--partition=x"
     )
     (sbatch,) = [c for c in slurm.calls if c[0] == "sbatch"]
-    assert any(a.startswith("--begin=") for a in sbatch)
+    assert f"--begin={slurm_time(now())}" in sbatch  # due now: never ticked
+
+
+def test_successor_begins_when_next_due(workdir, clock, slurm):
+    _submit(workdir, schedule="*/5 * * * *")
+    # queued by a daemon job about to tick the due dispatch: the successor
+    # begins at the following firing, not when this job ends
+    submit_daemon(workdir, successor=True)
+    (sbatch,) = [c for c in slurm.calls if c[0] == "sbatch"]
+    t = now()
+    due = t.replace(second=0, microsecond=0) + datetime.timedelta(
+        minutes=5 - t.minute % 5
+    )
+    assert f"--begin={slurm_time(due)}" in sbatch
+    run_tick_once(workdir)  # once ticked, the next firing is the same
+    slurm.calls.clear()
+    submit_daemon(workdir, successor=True)
+    (sbatch,) = [c for c in slurm.calls if c[0] == "sbatch"]
+    assert f"--begin={slurm_time(due)}" in sbatch
 
 
 def test_cancel_chain_only_when_nothing_is_active(workdir, clock, slurm):

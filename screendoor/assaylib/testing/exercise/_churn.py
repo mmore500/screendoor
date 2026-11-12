@@ -2,7 +2,7 @@ from .... import churn as scd_churn
 
 DEFAULT_CMD = (
     'echo \'!!!screendoor:telemetry {"hello": "world"}\'; '
-    "echo '!!!screendoor:result true'"
+    "echo '!!!screendoor:payload true'"
 )
 
 

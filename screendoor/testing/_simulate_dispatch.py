@@ -1,10 +1,12 @@
 import contextlib
+import os
 import tempfile
 
 from ..auxlib._DispatchContext import load_dispatches
 from ..daemon._run_busyloop import run_busyloop
 from ..daemon._submit_dispatch import submit_dispatch
 from ._FakeClock import FakeClock
+from ._hooks import INLINE_HOOKS, write_workdir_hooks
 from ._register_hook import register_hook
 
 
@@ -24,16 +26,19 @@ def simulate_dispatch(
     ``assay`` is an expression or a churn function. ``fake_trial(trial) ->
     result`` stands in for each trial's script (``trial`` has key, env,
     cmd and attempt); raising fails the trial with kind ``error``.
-    Without it, the scripts really run. Other ``settings`` go into the
-    dispatch.
+    Without it, the scripts really run. The dispatch gets INLINE_HOOKS
+    (progress notices silenced), then ``settings``. A workdir without a
+    ``screendoor.json`` gets one with WORKDIR_HOOKS.
 
     To resume an existing ``workdir``, pass ``submit=False`` and, if it
     holds several dispatches, ``dispatch_uuid``.
 
-    Returns ``{"workdir", "dispatch_uuid", "closed", "trials", "memo"}``.
+    Returns ``{"workdir", "dispatch_uuid", "completed", "trials", "memo"}``.
     """
     clock = clock or FakeClock()
     workdir = workdir or tempfile.mkdtemp(prefix="screendoor-sim-")
+    if not os.path.exists(os.path.join(workdir, "screendoor.json")):
+        write_workdir_hooks(workdir)
     with contextlib.ExitStack() as stack:
         if clock._saved is None:  # not already entered by the caller
             stack.enter_context(clock)
@@ -47,9 +52,8 @@ def simulate_dispatch(
                 "assay": assay,
                 "assay_kwargs": assay_kwargs or {},
                 "schedule": "* * * * *",
+                **INLINE_HOOKS,
                 "how_launch": launch,
-                "how_poke": "scd.orch.inline.poke()",
-                "how_kill": "scd.orch.inline.kill()",
                 "how_notify_progress": "scd.notify.null.notify()",
                 **settings,
             }
@@ -63,7 +67,7 @@ def simulate_dispatch(
         return {
             "workdir": workdir,
             "dispatch_uuid": ctx.dispatch_uuid,
-            "closed": ctx.closed,
+            "completed": ctx.completed,
             "trials": ctx.read_trials() if ctx.is_setup else [],
             "memo": ctx.hook("how_read_memo")(ctx) if ctx.is_setup else [],
         }

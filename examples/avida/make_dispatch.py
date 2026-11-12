@@ -74,22 +74,49 @@ def make_dispatch(
         "meta_user": subprocess.check_output(["id", "-un"], text=True).strip(),
         "meta_attempt": subprocess.check_output(["date"], text=True).strip(),
         "assay": "scd.churn.seed_global_rngs("
-        f"scd.assaylib.skeletonize.{policy})",
+        f"scd.assaylib.skeletonization.{policy})",
         "assay_kwargs": kwargs,
         "schedule": schedule,
         "trial_batchsize": trial_batchsize,
         "trial_batch_timeout": 600,
+        # every hook is spelled out: none has a default
+        "how_setup": "scd.record.appendjsonl.setup()",
+        "how_read_trial_submissions": "scd.record.appendjsonl.read_trial_submissions()",
+        "how_write_trial_submissions": "scd.record.appendjsonl.write_trial_submissions()",
+        "how_read_trial_payloads": "scd.record.appendjsonl.read_trial_payloads()",
+        "how_write_trial_payloads": "scd.record.appendjsonl.write_trial_payloads()",
+        "how_prep_trial_payloads": "scd.record.appendjsonl.prep_trial_payloads()",
+        "how_read_trial_telemetry": "scd.record.appendjsonl.read_trial_telemetry()",
+        "how_write_trial_telemetry": "scd.record.appendjsonl.write_trial_telemetry()",
+        "how_read_memo": "scd.record.appendjsonl.read_memo()",
+        "how_write_memo": "scd.record.appendjsonl.write_memo()",
+        "how_read_notify": "scd.record.appendjsonl.read_notify()",
+        "how_write_notify": "scd.record.appendjsonl.write_notify()",
+        "how_notify_progress": "scd.notify.log.notify()",
+        "how_notify_eta": "scd.notify.log.notify()",
+        "how_notify_success": "scd.notify.log.notify()",
+        "how_notify_failure": "scd.notify.log.notify()",
+        "how_notify_warning": "scd.notify.log.notify()",
+        "how_notify_anomaly": "scd.notify.log.notify()",
+        "how_unblock_churn": "scd.unblock.all_trials_ready",
+        "how_cleanup_success": "lambda *args, **kwargs: ("
+        "scd.cleanup.tar(*args, **kwargs), scd.cleanup.clear(*args, **kwargs))",
+        "how_cleanup_failure": "lambda *args, **kwargs: None",
     }
     if meta_seed is not None:  # else submit_dispatch draws one
         d["meta_seed"] = meta_seed
     if orchestrator == "subprocess":
         d["how_launch"] = "scd.orch.subprocess.launch()"
         d["how_poke"] = "scd.orch.subprocess.poke()"
+        d["how_kill"] = "scd.orch.subprocess.kill()"
         d[
-            "how_throttle"
+            "how_throttle_churn"
         ] = f"scd.orch.subprocess.throttle(max_procs={max_procs})"
     elif orchestrator == "slurm":
-        d["how_launch"] = "scd.orch.slurm.launch(" "sbatch_flags='--mem=1G')"
+        d["how_launch"] = "scd.orch.slurm.launch(sbatch_flags='--mem=1G')"
+        d["how_poke"] = "scd.orch.slurm.poke()"
+        d["how_kill"] = "scd.orch.slurm.kill()"
+        d["how_throttle_churn"] = "scd.orch.slurm.throttle(max_jobs=500)"
     return d
 
 

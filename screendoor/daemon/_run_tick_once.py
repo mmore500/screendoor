@@ -38,7 +38,7 @@ def next_firing(ctx):
 def run_tick_once(workdir: str, *, force: bool = False) -> list:
     """Tick every due active dispatch once. Returns the active dispatches.
 
-    Active means neither closed nor killed. Each pass pings
+    Active means neither completed nor killed. Each pass pings
     how_notify_liveness.
     """
     with workdir_lock(workdir) as locked:

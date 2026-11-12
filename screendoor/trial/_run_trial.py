@@ -53,7 +53,7 @@ class _TagCollector:
             )
             return
         with self.lock:
-            if channel == "result":  # last one wins
+            if channel == "payload":  # the result; last one wins
                 self.result = value
             else:
                 self.channels.setdefault(channel, []).append(value)

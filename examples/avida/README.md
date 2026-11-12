@@ -1,7 +1,7 @@
 # Skeletonizing Avida organisms
 
 `avida_fitness.py` scores one sequence on Avida's Test CPU (`avida -a`) and
-prints `!!!screendoor:result {"score": fitness, "viable", "tasks", ...}`.
+prints `!!!screendoor:payload {"score": fitness, "viable", "tasks", ...}`.
 Knocked-out sites are `nop-X` (`A`), as in the 2026-11-03 work. Acceptance
 (`make_dispatch.py`) matches `AvidaExactOracle(rel_fitness_tol=0.02)`.
 

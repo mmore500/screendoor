@@ -158,11 +158,11 @@ SLOTTED = {
 def test_trials_recorded_in_their_task_id_slots(tmp_path):
     r = simulate_dispatch(
         "scd.assaylib.testing.exercise",
-        {"n": 5, "cmd": 'echo "!!!screendoor:result $((i * i))"'},
+        {"n": 5, "cmd": 'echo "!!!screendoor:payload $((i * i))"'},
         workdir=str(tmp_path),
         **SLOTTED,
     )
-    assert r["closed"]["outcome"] == "succeeded"
+    assert r["completed"]["outcome"] == "succeeded"
     assert [t["task_id"] for t in r["trials"]] == [0, 1, 2, 3, 4]
     (ctx,) = load_dispatches(str(tmp_path))
     slots = sj.read(os.path.join(ctx.run_dir, "trial_payloads.slots.jsonl"))
@@ -201,7 +201,7 @@ def test_jsonl_records_take_no_slots(tmp_path):
 
 
 def test_slot_size_set_once_in_prep_payload(tmp_path, caplog):
-    big = "x" * 6000  # too large for 4096-byte slots, fits in 8192
+    big = "x" * 6000  # fits in 8192-byte slots
     r = simulate_dispatch(
         "scd.assaylib.testing.exercise",
         {"n": 2},

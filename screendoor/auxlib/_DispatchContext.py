@@ -39,33 +39,41 @@ FILES = (
     "notify",
 )
 
-HOOK_DEFAULTS = {
-    "how_launch": "scd.orch.slurm.launch()",
-    "how_poke": "scd.orch.slurm.poke()",
-    "how_kill": "scd.orch.slurm.kill()",
-    "how_throttle": "lambda *args, **kwargs: True",
-    "how_setup": "scd.record.appendjsonl.setup()",
-    **{f"how_notify_{lv}": "scd.notify.log.notify()" for lv in LEVELS},
-    **{f"how_read_{f}": f"scd.record.appendjsonl.read_{f}()" for f in FILES},
-    **{f"how_write_{f}": f"scd.record.appendjsonl.write_{f}()" for f in FILES},
-    "how_prep_trial_payloads": "scd.record.appendjsonl.prep_trial_payloads()",
-    "how_unblock_churn": "scd.unblock.all_trials_ready",
-    "how_cleanup_success": "lambda *args, **kwargs: ("
-    "scd.cleanup.tar(*args, **kwargs), scd.cleanup.clear(*args, **kwargs))",
-    "how_cleanup_failure": "lambda *args, **kwargs: None",
-}
+# every dispatch must set each of these to an expression: none has a default
+HOOK_NAMES = (
+    "how_launch",
+    "how_poke",
+    "how_kill",
+    "how_throttle_churn",
+    "how_setup",
+    *(f"how_notify_{lv}" for lv in LEVELS),
+    *(f"how_{op}_{f}" for f in FILES for op in ("read", "write")),
+    "how_prep_trial_payloads",
+    "how_unblock_churn",
+    "how_cleanup_success",
+    "how_cleanup_failure",
+)
 
-# the daemon's own hooks, which belong to no dispatch: set in screendoor.json
-WORKDIR_HOOK_DEFAULTS = {
-    **{
-        f"how_{op}_dispatch_{f}": f"scd.record.appendjsonl.{op}_dispatch_{f}()"
+# the daemon's own hooks, which belong to no dispatch: screendoor.json must
+# set each of these
+WORKDIR_HOOK_NAMES = (
+    *(
+        f"how_{op}_dispatch_{f}"
+        for f in ("submissions", "payloads", "telemetry")
         for op in ("read", "write")
-        for f in ("submissions", "payloads")
-    },
-    "how_log_info": "logging.info",
-    "how_notify_liveness": "scd.notify.null.notify()",
-    "how_notify_termination": "scd.notify.log.notify()",
-}
+    ),
+    "how_log_info",
+    "how_notify_liveness",
+    "how_notify_termination",
+)
+
+
+class MissingHookError(ValueError):
+    """A hook was not supplied; screendoor has no default for any."""
+
+
+def missing_hooks(names, supplied: dict) -> list:
+    return [name for name in names if name not in supplied]
 
 
 def run_dir_name(record: dict, submitted_ts: str) -> str:
@@ -79,24 +87,31 @@ def run_dir_name(record: dict, submitted_ts: str) -> str:
 
 
 class WorkdirHooks:
-    """Daemon-level hooks, from the optional ``screendoor.json``.
+    """Daemon-level hooks, from the workdir's ``screendoor.json``.
 
-    Each ``how_<name>`` hook becomes the attribute ``<name>``.
+    The file must set every name in WORKDIR_HOOK_NAMES; each
+    ``how_<name>`` hook becomes the attribute ``<name>``.
     """
 
     dispatch_uuid = "daemon"  # how notifiers label the daemon's own messages
 
     def __init__(self, workdir: str):
         self.workdir = os.path.abspath(workdir)
+        path = os.path.join(self.workdir, "screendoor.json")
         try:
-            path = os.path.join(self.workdir, "screendoor.json")
             with open(path, encoding="utf-8") as fh:
                 cfg = json.load(fh)
         except FileNotFoundError:
-            cfg = {}
+            raise MissingHookError(
+                f"{path} is missing; it must set "
+                + ", ".join(WORKDIR_HOOK_NAMES)
+            ) from None
+        missing = missing_hooks(WORKDIR_HOOK_NAMES, cfg)
+        if missing:
+            raise MissingHookError(f"{path} must set " + ", ".join(missing))
         namespace = make_eval_namespace(cfg.get("eval_context"))
-        for name, default in WORKDIR_HOOK_DEFAULTS.items():
-            hook = eval_hook(cfg.get(name, default), namespace)
+        for name in WORKDIR_HOOK_NAMES:
+            hook = eval_hook(cfg[name], namespace)
             setattr(self, name.removeprefix("how_"), hook)
 
 
@@ -126,7 +141,7 @@ class DispatchContext:
         self._hooks: dict = {}
         # lifecycle, folded from the dispatch events
         self.is_setup = False
-        self.closed = None  # the `closed` event, once there is one
+        self.completed = None  # the `completed` event, once there is one
         self.killed = False  # paused by kill_dispatch, until resumed
         self.churn_error_streak = 0
         self.churn_error = None  # repr of the error, while the streak lasts
@@ -136,7 +151,7 @@ class DispatchContext:
     @property
     def active(self) -> bool:
         """Whether the daemon should tick this dispatch."""
-        return self.closed is None and not self.killed
+        return self.completed is None and not self.killed
 
     @functools.cached_property
     def namespace(self) -> dict:
@@ -148,7 +163,11 @@ class DispatchContext:
         return getattr(assay, "churn", assay)
 
     def hook_expr(self, name: str) -> str:
-        return self.record.get(name, HOOK_DEFAULTS[name])
+        if name not in self.record:
+            raise MissingHookError(
+                f"dispatch {self.dispatch_uuid} does not set {name}"
+            )
+        return self.record[name]
 
     def hook(self, name: str):
         if name not in self._hooks:
@@ -159,9 +178,14 @@ class DispatchContext:
         return os.path.join(self.run_dir, "trials", trial_uuid)
 
     def write_dispatch_payload(self, record: dict) -> dict:
-        """Record one thing the daemon did with this dispatch."""
+        """Record how this dispatch ended: its ``completed`` event."""
         record = {**self.labels, **record}
         return self.wdhooks.write_dispatch_payloads(self.workdir, record)
+
+    def write_dispatch_telemetry(self, record: dict) -> dict:
+        """Record something that happened to this dispatch along the way."""
+        record = {**self.labels, **record}
+        return self.wdhooks.write_dispatch_telemetry(self.workdir, record)
 
     def read_trial_submissions(self) -> list:
         return self.hook("how_read_trial_submissions")(self)
@@ -191,12 +215,14 @@ def fold_dispatch_events(
     workdir: str,
     submissions: list[dict],
     payloads: list[dict],
+    telemetry: list[dict],
     wdhooks: WorkdirHooks | None = None,
 ) -> list[DispatchContext]:
-    """Fold dispatch submissions and payloads into one DispatchContext each.
+    """Fold dispatch records into one DispatchContext each.
 
-    Each ``submitted`` submission makes a dispatch; the payloads (setup,
-    ticked, churn_error, killed, resumed, closed) give its state.
+    Each ``submitted`` submission makes a dispatch. Its payload, ``completed``,
+    says how it ended; its telemetry (setup, ticked, churn_error, killed,
+    resumed, cleanup_error) gives its state along the way.
     """
     ctxs: dict[str, DispatchContext] = {}
     for ev in submissions:
@@ -204,14 +230,15 @@ def fold_dispatch_events(
             ctxs[ev["dispatch_uuid"]] = DispatchContext(
                 workdir, ev["dispatch"], ev["ts"], wdhooks
             )
-    for ev in sorted(payloads, key=lambda e: parse_iso(e["ts"])):
+    events = [*payloads, *telemetry]
+    for ev in sorted(events, key=lambda e: parse_iso(e["ts"])):
         ctx = ctxs.get(ev.get("dispatch_uuid"))
         if ctx is None:
             continue
         if ev["event"] == "setup":
             ctx.is_setup = True
-        elif ev["event"] == "closed":
-            ctx.closed = ctx.closed or ev
+        elif ev["event"] == "completed":
+            ctx.completed = ctx.completed or ev
         elif ev["event"] in ("killed", "resumed"):
             ctx.killed = ev["event"] == "killed"
         elif ev["event"] == "churn_error":
@@ -230,4 +257,7 @@ def load_dispatches(workdir: str) -> list[DispatchContext]:
     wdhooks = WorkdirHooks(workdir)
     submissions = wdhooks.read_dispatch_submissions(wdhooks.workdir)
     payloads = wdhooks.read_dispatch_payloads(wdhooks.workdir)
-    return fold_dispatch_events(workdir, submissions, payloads, wdhooks)
+    telemetry = wdhooks.read_dispatch_telemetry(wdhooks.workdir)
+    return fold_dispatch_events(
+        workdir, submissions, payloads, telemetry, wdhooks
+    )

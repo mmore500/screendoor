@@ -1,0 +1,11 @@
+{
+  "how_read_dispatch_submissions": "scd.record.appendjsonl.read_dispatch_submissions()",
+  "how_write_dispatch_submissions": "scd.record.appendjsonl.write_dispatch_submissions()",
+  "how_read_dispatch_payloads": "scd.record.appendjsonl.read_dispatch_payloads()",
+  "how_write_dispatch_payloads": "scd.record.appendjsonl.write_dispatch_payloads()",
+  "how_read_dispatch_telemetry": "scd.record.appendjsonl.read_dispatch_telemetry()",
+  "how_write_dispatch_telemetry": "scd.record.appendjsonl.write_dispatch_telemetry()",
+  "how_log_info": "logging.info",
+  "how_notify_liveness": "scd.notify.null.notify()",
+  "how_notify_termination": "scd.notify.log.notify()"
+}

@@ -82,7 +82,7 @@ def test_seed_global_rngs_takes_an_assay_module():
         {"n": 2},
         fake_trial=lambda t: True,
     )
-    assert r["closed"]["outcome"] == "succeeded"
+    assert r["completed"]["outcome"] == "succeeded"
 
 
 def test_library_leaves_global_rngs_alone():

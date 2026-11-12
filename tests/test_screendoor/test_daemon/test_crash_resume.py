@@ -5,7 +5,7 @@ import collections
 
 import pytest
 
-from screendoor.assaylib.skeletonize._engine._codec import decode_sites
+from screendoor.assaylib.skeletonization._engine._codec import decode_sites
 from screendoor.auxlib._DispatchContext import load_dispatches
 from screendoor.testing import (
     FakeClock,
@@ -16,14 +16,14 @@ from screendoor.testing import (
 
 ASSAYS = [
     (
-        "scd.assaylib.skeletonize.hybrid",
+        "scd.assaylib.skeletonization.hybrid",
         {"n_sites": 12, "cmd": "x", "batch_size": 4},
         lambda t: {
             "accept": {1, 5, 6, 11} <= decode_sites(t["env"]["retained"])
         },
     ),
     (
-        "scd.assaylib.skeletonize.naive_jenga",
+        "scd.assaylib.skeletonization.naive_jenga",
         {"components": list("abcde"), "cmd": "x", "width": 2},
         lambda t: {"passes": "c" in t["env"]["components"].split()},
     ),
@@ -54,7 +54,7 @@ def test_crash_everywhere(tmp_path, assay, kwargs, fake_trial):
         )
 
     with FakeClock() as clock:
-        want = simulate(str(tmp_path / "clean"), clock)["closed"]["summary"]
+        want = simulate(str(tmp_path / "clean"), clock)["completed"]["summary"]
     n_appends = sum(
         len(p.read_text().splitlines())
         for p in (tmp_path / "clean").rglob("*.jsonl")
@@ -70,8 +70,8 @@ def test_crash_everywhere(tmp_path, assay, kwargs, fake_trial):
                 pass
             # resume; or, if the crash came while submitting, submit again
             r = simulate(workdir, clock, submit=not load_dispatches(workdir))
-        assert r["closed"] is not None, crash_at
-        got = r["closed"]["summary"]
+        assert r["completed"] is not None, crash_at
+        got = r["completed"]["summary"]
         for k in ("retained", "skeleton", "certified"):
             assert got.get(k) == want.get(k), (crash_at, k)
         assert max_repeats(workdir) == 1, crash_at

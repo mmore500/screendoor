@@ -1,6 +1,7 @@
 import datetime
 
 from ...auxlib._DispatchContext import load_dispatches
+from ...auxlib._next_cron_firing import next_cron_firing
 from ...auxlib._now_iso import now
 from ...orch.slurm import _run_slurm_command as _rsc
 from .._run_tick_once import next_firing
@@ -22,10 +23,25 @@ def queued_chain_jobs(workdir: str) -> list:
     return [tuple(line.split("|", 1)) for line in out.split()]
 
 
-def earliest_begin(workdir: str) -> datetime.datetime | None:
-    """Earliest next firing over active dispatches; None if there are none."""
-    firings = [next_firing(c) for c in load_dispatches(workdir) if c.active]
-    return max(min(firings), now()) if firings else None
+def earliest_begin(
+    workdir: str, *, successor: bool = False
+) -> datetime.datetime | None:
+    """Earliest next firing over active dispatches; None if there are none.
+
+    With ``successor``, a dispatch due now counts at its following cron
+    firing instead: the daemon job queueing the successor is about to tick
+    it, so the successor's ``--begin`` is when it is next due after that.
+    """
+    t = now()
+    firings = []
+    for c in load_dispatches(workdir):
+        if not c.active:
+            continue
+        firing = next_firing(c)
+        if successor and firing <= now():  # due: the caller ticks it now
+            firing = next_cron_firing(c.record["schedule"], t)
+        firings.append(firing)
+    return max(min(firings), t) if firings else None
 
 
 def slurm_time(dt: datetime.datetime) -> str:
