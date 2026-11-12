@@ -11,7 +11,7 @@ def notify_daemon(dispatchdir: str, level: str, message: str) -> None:
     """Send one of the daemon's own notifications; never raises.
 
     ``level`` is ``liveness`` or ``termination``, each with a
-    ``how_notify_<level>`` hook in ``screendoor.json``. The notifier's ctx
+    ``how_notify_<level>`` hook in ``dispatch_hooks.json``. The notifier's ctx
     is ``{"dispatchdir"}``, with no ``dispatch_uuid``, and what it returns
     is appended to ``<dispatchdir>/dispatch_notify.jsonl``.
 

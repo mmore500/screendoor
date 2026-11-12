@@ -369,7 +369,7 @@ def test_dispatchdir_hooks_must_be_supplied(tmp_path):
     )
 
     ok = {"assay": EXERCISE, "schedule": "* * * * *", **INLINE_HOOKS}
-    with pytest.raises(MissingHookError, match="screendoor.json is missing"):
+    with pytest.raises(MissingHookError, match="hooks.json is missing"):
         submit_dispatch(ok, str(tmp_path))
     path = write_dispatchdir_hooks(str(tmp_path))
     with open(path) as fh:

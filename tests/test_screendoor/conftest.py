@@ -11,7 +11,7 @@ def clock():
 
 @pytest.fixture
 def dispatchdir(tmp_path):
-    """A dispatchdir whose screendoor.json sets every daemon hook."""
+    """A dispatchdir whose dispatch_hooks.json sets every daemon hook."""
     path = str(tmp_path / "wd")
     write_dispatchdir_hooks(path)
     return path

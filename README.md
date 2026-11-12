@@ -26,7 +26,7 @@ screendoor runs *dynamic screens*: searches over trials (knockouts, ablations, p
 A daemon wakes on a cron schedule, rebuilds state from append-only JSONL records, asks the assay's `churn` function what to do next, and carries out the actions it returns.
 The records are the state: kill the daemon at any moment; start it again and the dispatch resumes.
 Churn is pure: records in, actions out.
-Every side effect is a hook, and no hook has a default: a dispatch sets all of its hooks; the dispatchdir's `screendoor.json` sets the daemon's.
+Every side effect is a hook, and no hook has a default: a dispatch sets all of its hooks; the dispatchdir's `dispatch_hooks.json` sets the daemon's.
 
 screendoor is standard library only, Python 3.10+.
 Built-in assays cover smoke tests, potentiation scans and skeletonization (jenga, ddmin, Minesweeper, hybrid and GAMA); see [docs/skeletonization.md](docs/skeletonization.md).
@@ -36,7 +36,7 @@ See [docs/guide.md](docs/guide.md) for writing assays, every dispatch setting an
 ## Usage
 
 ```bash
-mkdir -p work && cat > work/screendoor.json <<'JSON'
+mkdir -p work && cat > work/dispatch_hooks.json <<'JSON'
 {
   "how_read_dispatch_submissions": "scd.record.appendjsonl.read_dispatch_submissions()",
   "how_write_dispatch_submissions": "scd.record.appendjsonl.write_dispatch_submissions()",
@@ -91,7 +91,7 @@ python3 -m screendoor.daemon.run_busyloop --dispatchdir work
 python3 -m screendoor.daemon.print_status --dispatchdir work
 ```
 
-`screendoor.json` holds the daemon's own hooks. The dispatch has labels,
+`dispatch_hooks.json` holds the daemon's own hooks. The dispatch has labels,
 an assay with its kwargs, a cron `schedule` and its hooks; the smoke-test
 assay here launches `n` trials of `cmd`, each with `$i` in its env, and
 succeeds with what they sent. The second heredoc is unquoted so the shell
@@ -102,7 +102,7 @@ results `[0, 1, 4, 9]`, and `work/` holds:
 
 ```
 work/
-  screendoor.json
+  dispatch_hooks.json
   dispatch_submissions.jsonl  dispatch_payloads.jsonl  dispatch_telemetry.jsonl
   dispatch_notify.jsonl       dispatch_log.txt
   project=default/

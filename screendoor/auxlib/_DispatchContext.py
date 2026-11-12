@@ -56,7 +56,7 @@ HOOK_NAMES = (
     "how_cleanup_failure",
 )
 
-# the daemon's own hooks, which belong to no dispatch: screendoor.json must
+# the daemon's own hooks, which belong to no dispatch: dispatch_hooks.json must
 # set each of these
 DISPATCHDIR_HOOK_NAMES = (
     *(
@@ -75,7 +75,8 @@ class MissingHookError(ValueError):
 
 
 class DispatchdirConfigError(ValueError):
-    """The dispatchdir's screendoor.json is missing, incomplete or wrong."""
+    """The dispatchdir's dispatch_hooks.json is missing, incomplete or
+    wrong."""
 
 
 def missing_hooks(names: typing.Iterable[str], supplied: dict) -> list[str]:
@@ -128,7 +129,7 @@ def run_dir_name(record: dict, submitted_ts: str) -> str:
 
 
 class DispatchdirHooks:
-    """Daemon-level hooks, from the dispatchdir's ``screendoor.json``.
+    """Daemon-level hooks, from the dispatchdir's ``dispatch_hooks.json``.
 
     The file must set every name in DISPATCHDIR_HOOK_NAMES. Each hook is
     called with ``hook_ctx`` first, except ``how_log_info``, which gets
@@ -147,13 +148,13 @@ class DispatchdirHooks:
     Raises
     ------
     DispatchdirConfigError
-        If ``screendoor.json`` is missing, misses a hook or has unknown
+        If ``dispatch_hooks.json`` is missing, misses a hook or has unknown
         keys.
     """
 
     def __init__(self, dispatchdir: str) -> None:
         self.dispatchdir = os.path.abspath(dispatchdir)
-        path = os.path.join(self.dispatchdir, "screendoor.json")
+        path = os.path.join(self.dispatchdir, "dispatch_hooks.json")
         try:
             with open(path, encoding="utf-8") as fh:
                 cfg = json.load(fh)

@@ -11,7 +11,7 @@ From this directory, with screendoor importable:
 ```bash
 export AVIDA_BINARY=/path/to/avida
 export AVIDA_CONFIG_DIR=/path/to/avida-core/support/config
-mkdir -p work && cp screendoor.json work/   # the daemon's hooks
+mkdir -p work && cp dispatch_hooks.json work/   # the daemon's hooks
 python3 make_dispatch.py nand_50 --policy hybrid \
   | python3 -m screendoor.daemon.submit_dispatch - --dispatchdir work
 python3 -m screendoor.daemon.run_busyloop --dispatchdir work

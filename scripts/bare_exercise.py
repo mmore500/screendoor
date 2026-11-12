@@ -66,7 +66,7 @@ DISPATCHDIR_HOOKS = {
     "how_notify_termination": "scd.notify.log.notify()",
 }
 with tempfile.TemporaryDirectory() as dispatchdir:
-    with open(os.path.join(dispatchdir, "screendoor.json"), "w") as fh:
+    with open(os.path.join(dispatchdir, "dispatch_hooks.json"), "w") as fh:
         json.dump(DISPATCHDIR_HOOKS, fh, indent=2)
     run(
         "submit_dispatch",

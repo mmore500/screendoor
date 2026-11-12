@@ -105,7 +105,7 @@ def submit_dispatch(obj: dict, dispatchdir: str) -> str:
     Raises
     ------
     DispatchdirConfigError
-        If the dispatchdir's ``screendoor.json`` is missing or wrong.
+        If the dispatchdir's ``dispatch_hooks.json`` is missing or wrong.
     ValueError
         If ``obj`` is not a valid dispatch, its dispatch_uuid exists, or
         an open dispatch uses its run directory.

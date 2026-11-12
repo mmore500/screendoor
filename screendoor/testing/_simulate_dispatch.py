@@ -29,7 +29,7 @@ def simulate_dispatch(
     cmd and attempt); raising fails the trial with kind ``error``.
     Without it, the scripts really run. The dispatch gets INLINE_HOOKS
     (progress notices silenced), then ``settings``. A dispatchdir without a
-    ``screendoor.json`` gets one with DISPATCHDIR_HOOKS.
+    ``dispatch_hooks.json`` gets one with DISPATCHDIR_HOOKS.
 
     To resume an existing ``dispatchdir``, pass ``submit=False`` and, if it
     holds several dispatches, ``dispatch_uuid``.
@@ -61,7 +61,7 @@ def simulate_dispatch(
     """
     clock = clock or FakeClock()
     dispatchdir = dispatchdir or tempfile.mkdtemp(prefix="screendoor-sim-")
-    if not os.path.exists(os.path.join(dispatchdir, "screendoor.json")):
+    if not os.path.exists(os.path.join(dispatchdir, "dispatch_hooks.json")):
         write_dispatchdir_hooks(dispatchdir)
     with contextlib.ExitStack() as stack:
         if not clock.active:  # not already entered by the caller
