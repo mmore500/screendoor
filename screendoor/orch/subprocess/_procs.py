@@ -35,18 +35,22 @@ def read_pidfile(path: str) -> tuple | None:
         return None
 
 
-def is_alive(path: str) -> bool:
-    """Whether the batch whose pidfile is ``path`` is still running."""
+def live_pid(path: str) -> int | None:
+    """The pid of the batch whose pidfile is ``path``, if it still runs."""
     found = read_pidfile(path)
     if found is None:
-        return False
+        return None
     pid, start = found
     if os.path.isdir("/proc"):
-        return _starttime(pid) == start
+        return pid if _starttime(pid) == start else None
     try:  # pragma: no cover - non-Linux fallback
         os.kill(pid, 0)
     except ProcessLookupError:
-        return False
+        return None
     except PermissionError:
         pass
-    return True
+    return pid
+
+
+def is_alive(path: str) -> bool:
+    return live_pid(path) is not None

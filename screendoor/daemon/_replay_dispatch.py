@@ -3,8 +3,7 @@ import os
 from ..auxlib._DispatchContext import load_dispatches
 from ..auxlib._canonical_json import canonical_json
 from ..auxlib._fold_trial_events import fold_trial_events
-from ..auxlib._make_trial_uuid import make_trial_uuid
-from ._apply_actions import churn_step
+from ._apply_actions import check_actions, churn_step, plan_actions
 
 
 def replay_dispatch(
@@ -20,7 +19,8 @@ def replay_dispatch(
     one. Prints a line per step and returns the per-step reports.
     """
     run_dir = os.path.abspath(run_dir)
-    ctxs = load_dispatches(os.path.dirname(run_dir))
+    # run dirs are <dispatchdir>/project=.../date=...
+    ctxs = load_dispatches(os.path.dirname(os.path.dirname(run_dir)))
     ctx = next((c for c in ctxs if c.run_dir == run_dir), None)
     if ctx is None:
         raise LookupError(f"no dispatch with run dir {run_dir}")
@@ -28,7 +28,7 @@ def replay_dispatch(
         ctx.record = {**ctx.record, "assay": assay}
     submissions = ctx.read_trial_submissions()
     payloads = ctx.read_trial_payloads()
-    memo_events = ctx.hook("how_read_memo")(ctx, raw=True)
+    memo_events = ctx.read_churn_memo_events()
 
     steps: dict = {}  # churn step -> what that churn call recorded
     for e in submissions + memo_events:
@@ -49,16 +49,9 @@ def replay_dispatch(
         pays = [e for e in payloads if e["ts"] < step["ts"]]
         trials = fold_trial_events(subs + pays)
         memo = [e["data"] for e in memo_events if e["ts"] < step["ts"]]
-        actions = ctx.churn(ctx.record, subs, pays, memo)
-        known = {t["trial_uuid"] for t in trials}
-        keys = [
-            t["key"]
-            for a in actions
-            if a["action"] == "launch"
-            for t in a["kwargs"]["trials"]
-            if make_trial_uuid(ctx.dispatch_uuid, t["key"]) not in known
-        ]
-        memos = [a["kwargs"]["data"] for a in actions if a["action"] == "memo"]
+        actions = check_actions(ctx.churn(ctx.record, subs, pays, memo))
+        requests, memos = plan_actions(ctx, actions, trials)
+        keys = [t["key"] for t in requests.values()]
         match = (
             churn_step(memo, subs) == key
             and sorted(map(canonical_json, keys))

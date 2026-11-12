@@ -15,7 +15,7 @@ def job_name(ctx, entries: list) -> str:
     return f"screendoor-{ctx.dispatch_uuid[:8]}-{digest[:12]}"
 
 
-def submit_trials(ctx, entries: list) -> None:
+def submit_trials(ctx, entries: list, n_trials: int) -> None:
     """Record a ``requested`` submission per entry, then launch them.
 
     Each entry has ``trial_uuid`` and ``attempt`` plus the fields its
@@ -25,8 +25,8 @@ def submit_trials(ctx, entries: list) -> None:
     A crash after recording and before launching leaves jobs that poke
     finds missing, so they are relaunched.
 
-    how_prep_trial_payloads makes room for every trial before the launch,
-    as storage sized before its writers start needs.
+    how_prep_trial_payloads runs before the launch, so that fixed-size
+    storage has room for all ``n_trials`` trials.
     """
     if not entries:
         return
@@ -41,7 +41,7 @@ def submit_trials(ctx, entries: list) -> None:
                     "job": {"name": name, "index": index},
                 }
             )
-    ctx.hook("how_prep_trial_payloads")(ctx, len(ctx.read_trials()))
+    ctx.hook("how_prep_trial_payloads")(ctx, n_trials)
     ctx.hook("how_launch")(
         ctx,
         name,

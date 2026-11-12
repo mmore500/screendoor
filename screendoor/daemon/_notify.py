@@ -1,17 +1,18 @@
 import logging
 
+from ..auxlib._DispatchContext import LEVELS
 from ..auxlib._now_iso import now
 
 
 def _history(ctx, level: str) -> list:
-    events = ctx.hook("how_read_notify")(ctx)
+    events = ctx.read_churn_notify()
     return [e for e in events if e.get("level") == level]
 
 
 def _record(ctx, level: str, events: list, **defaults) -> None:
     for event in events or []:
-        ctx.hook("how_write_notify")(
-            ctx, {"event": "sent", **defaults, **event, "level": level}
+        ctx.write_churn_notify(
+            {"event": "sent", **defaults, **event, "level": level}
         )
 
 
@@ -26,8 +27,9 @@ def notify(ctx, level: str, message: str, data: dict | None = None) -> None:
         logging.exception("screendoor: %s notification failed", level)
 
 
-def flush_batched_notifications(ctx, levels) -> None:
-    for level in levels:
+def flush_batched_notifications(ctx) -> None:
+    """Let each batching notifier send what it has held back."""
+    for level in LEVELS:
         try:
             hook = ctx.hook(f"how_notify_{level}")
             if hasattr(hook, "flush"):

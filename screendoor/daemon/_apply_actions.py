@@ -3,8 +3,8 @@ import logging
 from ..auxlib._make_trial_uuid import make_trial_uuid
 from ..auxlib._tally_trials import tally_trials
 from ..churn._ORDER import ORDER
-from ._launch_trials import submit_trials
 from ._notify import notify
+from ._submit_trials import submit_trials
 
 
 def churn_step(memo: list, trial_submissions: list) -> str:
@@ -38,22 +38,21 @@ def complete(ctx, outcome: str, **fields) -> None:
         )
 
 
-def apply_actions(
-    ctx, actions: list, trials: list, memo: list, step: str
-) -> bool:
-    """Carry out churn's actions; return whether a memo was written.
-
-    ``trials`` are the folded trials churn saw. Trial submissions and
-    memos record ``step``, the churn_step of the call, which is how
-    replay_dispatch finds the call that made them.
-    """
+def check_actions(actions) -> list:
+    """Churn's actions in the order they apply; raise if they are not a
+    list of actions."""
     if not isinstance(actions, list):
         raise TypeError(f"churn must return a list, got {type(actions)}")
     for a in actions:
         if not isinstance(a, dict) or a.get("action") not in ORDER:
             raise ValueError(f"not an action: {a!r}")
-    actions = sorted(actions, key=lambda a: ORDER.index(a["action"]))
+    return sorted(actions, key=lambda a: ORDER.index(a["action"]))
 
+
+def plan_actions(ctx, actions: list, trials: list) -> tuple:
+    """``(requests, memos)``: the new trials to submit, ``{trial_uuid:
+    trial}`` in request order, and the memo payloads. A request for a
+    trial that exists, or is asked for twice, is dropped."""
     known = {t["trial_uuid"] for t in trials}
     requests = {}
     for a in actions:
@@ -66,6 +65,21 @@ def apply_actions(
                 )
             else:
                 requests[uid] = t
+    memos = [a["kwargs"]["data"] for a in actions if a["action"] == "memo"]
+    return requests, memos
+
+
+def apply_actions(
+    ctx, actions: list, trials: list, memo: list, step: str
+) -> bool:
+    """Carry out churn's checked actions; return whether a memo was
+    written.
+
+    ``trials`` are the folded trials churn saw. Trial submissions and
+    memos record ``step``, the churn_step of the call, which is how
+    replay_dispatch finds the call that made them.
+    """
+    requests, memos = plan_actions(ctx, actions, trials)
     # task ids count trials in request order: 0, 1, 2, ...
     submit_trials(
         ctx,
@@ -80,12 +94,11 @@ def apply_actions(
             }
             for task_id, (uid, t) in enumerate(requests.items(), len(trials))
         ],
+        len(trials) + len(requests),
     )
 
-    memos = [a["kwargs"]["data"] for a in actions if a["action"] == "memo"]
     for index, data in enumerate(memos, start=len(memo)):
-        ctx.hook("how_write_memo")(
-            ctx,
+        ctx.write_churn_memo(
             {
                 "event": "memo",
                 "index": index,

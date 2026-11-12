@@ -18,7 +18,7 @@ def run(cmd, **settings):
             **settings,
         },
     )
-    (ctx,) = load_dispatches(r["workdir"])
+    (ctx,) = load_dispatches(r["dispatchdir"])
     return r["trials"][0], ctx
 
 
@@ -110,10 +110,10 @@ def test_success_archives_then_clears_trials(tmp_path):
     r = simulate_dispatch(
         "scd.assaylib.testing.exercise",
         {"n": 2, "cmd": "echo out; echo '!!!screendoor:payload 1'"},
-        workdir=str(tmp_path),
+        dispatchdir=str(tmp_path),
     )
     assert r["completed"]["outcome"] == "succeeded"
-    (ctx,) = load_dispatches(r["workdir"])
+    (ctx,) = load_dispatches(r["dispatchdir"])
     assert not os.path.exists(os.path.join(ctx.run_dir, "trials"))
     with tarfile.open(os.path.join(ctx.run_dir, "trials.tar.gz")) as archive:
         names = archive.getnames()
@@ -125,10 +125,10 @@ def test_failure_keeps_trials_by_default(tmp_path):
     r = simulate_dispatch(
         "scd.assaylib.testing.exercise",
         {"n": 1, "cmd": "exit 1"},
-        workdir=str(tmp_path),
+        dispatchdir=str(tmp_path),
     )
     assert r["completed"]["outcome"] == "failed"
-    (ctx,) = load_dispatches(r["workdir"])
+    (ctx,) = load_dispatches(r["dispatchdir"])
     assert os.path.isdir(os.path.join(ctx.run_dir, "trials"))
     assert not os.path.exists(os.path.join(ctx.run_dir, "trials.tar.gz"))
 
@@ -138,11 +138,11 @@ def test_cleanup_error_is_recorded_not_raised(tmp_path):
         "scd.assaylib.testing.exercise",
         {"n": 1},
         fake_trial=lambda t: True,
-        workdir=str(tmp_path),
+        dispatchdir=str(tmp_path),
         how_cleanup_success="lambda *args, **kwargs: 1 / 0",
     )
     assert r["completed"]["outcome"] == "succeeded"
-    (ctx,) = load_dispatches(r["workdir"])
-    events = ctx.wdhooks.read_dispatch_telemetry(r["workdir"])
+    (ctx,) = load_dispatches(r["dispatchdir"])
+    events = ctx.ddhooks.read_dispatch_telemetry(ctx.ddhooks)
     (e,) = [e for e in events if e["event"] == "cleanup_error"]
     assert e["hook"] == "success" and "ZeroDivisionError" in e["error"]

@@ -55,17 +55,8 @@ def _fold_trial(trial_uuid: str, events: list[dict]) -> dict | None:
 
 
 def fold_trial_events(events: list[dict]) -> list[dict]:
-    """Fold trial submissions and payloads into trial dicts, whatever the
-    line order.
-
-    Submissions are ``requested`` (one per attempt, naming the job that
-    runs it) and ``killed``; payloads are ``completed`` and ``failed``. A
-    payload from any attempt settles the trial, ``completed`` over
-    ``failed``. Until then a trial is ``requested``, or ``killed`` if
-    kill_dispatch cancelled its newest attempt. Each trial's ``state`` is
-    ``complete`` once it has succeeded or failed, and ``pending``
-    otherwise. Trials are ordered by first request.
-    """
+    """Fold trial submissions and payloads into one dict per trial, in
+    order of first request; see scd.churn.fold_trials."""
     by_uuid: dict[str, list] = {}
     for ev in events:
         if "trial_uuid" in ev:

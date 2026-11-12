@@ -5,11 +5,11 @@ from ._files import DISPATCH_TELEMETRY_FILE
 
 
 def read_dispatch_telemetry():
-    """Read every event in a workdir's dispatch_telemetry.jsonl."""
+    """Read every event in the dispatchdir's dispatch_telemetry.jsonl."""
 
-    def read_dispatch_telemetry(workdir: str) -> list:
+    def read_dispatch_telemetry(ddhooks) -> list:
         return read_jsonl_tolerant(
-            os.path.join(workdir, DISPATCH_TELEMETRY_FILE)
+            os.path.join(ddhooks.dispatchdir, DISPATCH_TELEMETRY_FILE)
         )
 
     return read_dispatch_telemetry

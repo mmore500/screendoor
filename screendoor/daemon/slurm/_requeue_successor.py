@@ -4,11 +4,11 @@ from ...auxlib._DispatchContext import load_dispatches
 from ...auxlib._next_cron_firing import next_cron_firing
 from ...auxlib._now_iso import now
 from ...orch.slurm import _run_slurm_command as _rsc
-from .._run_tick_once import next_firing
+from .._next_firing import next_firing
 from ._render_daemon_sbatch import chain_job_name
 
 
-def queued_chain_jobs(workdir: str) -> list:
+def queued_chain_jobs(dispatchdir: str) -> list:
     """Pending daemon jobs, as ``(jobid, start time)`` string pairs."""
     out = _rsc.run(
         [
@@ -16,7 +16,7 @@ def queued_chain_jobs(workdir: str) -> list:
             "--me",
             "--noheader",
             "--states=PENDING",
-            f"--name={chain_job_name(workdir)}",
+            f"--name={chain_job_name(dispatchdir)}",
             "--format=%i|%S",
         ]
     )
@@ -24,7 +24,7 @@ def queued_chain_jobs(workdir: str) -> list:
 
 
 def earliest_begin(
-    workdir: str, *, successor: bool = False
+    dispatchdir: str, *, successor: bool = False
 ) -> datetime.datetime | None:
     """Earliest next firing over active dispatches; None if there are none.
 
@@ -34,7 +34,7 @@ def earliest_begin(
     """
     t = now()
     firings = []
-    for c in load_dispatches(workdir):
+    for c in load_dispatches(dispatchdir):
         if not c.active:
             continue
         firing = next_firing(c)
@@ -48,9 +48,9 @@ def slurm_time(dt: datetime.datetime) -> str:
     return dt.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def pull_successor_forward(workdir: str, begin: datetime.datetime) -> bool:
+def pull_successor_forward(dispatchdir: str, begin: datetime.datetime) -> bool:
     """Move pending daemon jobs' start up to ``begin``; False if none."""
-    jobs = queued_chain_jobs(workdir)
+    jobs = queued_chain_jobs(dispatchdir)
     for jobid, start in jobs:
         try:
             if datetime.datetime.fromisoformat(start).astimezone() <= begin:

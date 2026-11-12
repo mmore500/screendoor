@@ -5,11 +5,11 @@ from ._files import DISPATCH_PAYLOADS_FILE
 
 
 def read_dispatch_payloads():
-    """Read every event in a workdir's dispatch_payloads.jsonl."""
+    """Read every event in the dispatchdir's dispatch_payloads.jsonl."""
 
-    def read_dispatch_payloads(workdir: str) -> list:
+    def read_dispatch_payloads(ddhooks) -> list:
         return read_jsonl_tolerant(
-            os.path.join(workdir, DISPATCH_PAYLOADS_FILE)
+            os.path.join(ddhooks.dispatchdir, DISPATCH_PAYLOADS_FILE)
         )
 
     return read_dispatch_payloads

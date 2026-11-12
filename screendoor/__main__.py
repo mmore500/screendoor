@@ -7,7 +7,7 @@ COMMANDS = {
     "screendoor.daemon.slurm.submit_daemon": "start the Slurm daemon chain",
     "screendoor.daemon.kill_dispatch": "cancel trials and pause dispatches",
     "screendoor.daemon.resume_dispatch": "resume killed dispatches",
-    "screendoor.daemon.print_status": "show every dispatch in a workdir",
+    "screendoor.daemon.print_status": "show every dispatch in a dispatchdir",
     "screendoor.daemon.replay_dispatch": "replay churn over a run dir",
     "screendoor.trial.worker": "run trials (launched for you)",
 }

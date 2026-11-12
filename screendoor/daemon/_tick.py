@@ -1,19 +1,20 @@
 import logging
 import traceback
 
-from ..auxlib._DispatchContext import LEVELS
 from ..auxlib._fold_trial_events import fold_trial_events
-from ._apply_actions import apply_actions, churn_step, complete
-from ._launch_trials import submit_trials
+from ._apply_actions import (
+    apply_actions,
+    check_actions,
+    churn_step,
+    complete,
+)
 from ._notify import flush_batched_notifications, notify
-
-# not yet settled, and not cancelled: poke checks these trials' jobs
-IN_PROGRESS = ("requested",)
+from ._setup_dispatch import setup_dispatch
+from ._submit_trials import submit_trials
 
 
 def _job_label(t: dict) -> str:
-    job = t["job"] or {}
-    return f"{job.get('name')}[{job.get('index')}]"
+    return f"{t['job']['name']}[{t['job']['index']}]"
 
 
 def relaunch(ctx, gone: set) -> None:
@@ -23,10 +24,11 @@ def relaunch(ctx, gone: set) -> None:
     """
     if not gone:
         return
-    vanished = {  # re-read: a result may have landed since the poke
+    trials = ctx.read_trials()  # re-read: a result may have landed since
+    vanished = {
         t["trial_uuid"]: t
-        for t in ctx.read_trials()
-        if t["trial_uuid"] in gone and t["status"] in (*IN_PROGRESS, "killed")
+        for t in trials
+        if t["trial_uuid"] in gone and t["status"] in ("requested", "killed")
     }
     entries = []
     for uid, t in vanished.items():
@@ -60,15 +62,35 @@ def relaunch(ctx, gone: set) -> None:
                 f"{t['retries'] + 1} times",
             },
         )
-    submit_trials(ctx, entries)
+    submit_trials(ctx, entries, len(trials))
+
+
+def _record_churn_error(ctx, streak: int, e: Exception) -> None:
+    tb = traceback.format_exc()
+    logging.error("screendoor: churn raised (%d in a row):\n%s", streak, tb)
+    ctx.write_dispatch_telemetry(
+        {
+            "event": "churn_error",
+            "streak": streak,
+            "error": repr(e),
+            "traceback": tb[-4000:],
+        },
+    )
+    if streak == 1:
+        data = {"dedupe_key": "churn_error"}
+        notify(ctx, "failure", f"churn raised: {e!r}", data)
+    if streak > ctx.record["churn_maxretry"]:
+        reason = f"churn raised {streak} consecutive ticks: {e!r}"
+        complete(ctx, "failed", reason=reason)
+        notify(ctx, "failure", "dispatch failed: churn keeps raising")
 
 
 def tick(ctx) -> None:
     """One daemon pass over one open dispatch."""
     if not ctx.is_setup:
-        ctx.hook("how_setup")(ctx)
+        setup_dispatch(ctx)
     trials = ctx.read_trials()
-    in_progress = [t for t in trials if t["status"] in IN_PROGRESS]
+    in_progress = [t for t in trials if t["status"] == "requested"]
     gone = ctx.hook("how_poke")(ctx, in_progress) if in_progress else ()
     killed = {t["trial_uuid"] for t in trials if t["status"] == "killed"}
     relaunch(ctx, set(gone) | killed)
@@ -80,45 +102,25 @@ def tick(ctx) -> None:
         payloads = ctx.read_trial_payloads()
         if not ctx.hook("how_unblock_churn")(ctx, submissions, payloads):
             break  # outstanding trials: churn waits for a later tick
-        trials = fold_trial_events(submissions + payloads)
-        memo = ctx.hook("how_read_memo")(ctx)
-        try:
-            actions = ctx.churn(ctx.record, submissions, payloads, memo)
-            if throttled:  # keep notifications and succeed / fail only
-                actions = [
-                    a
-                    for a in actions
-                    if a.get("action") not in ("launch", "memo")
-                ]
-            wrote_memo = apply_actions(
-                ctx, actions, trials, memo, churn_step(memo, submissions)
+        memo = ctx.read_churn_memo()
+        try:  # only churn's own errors count against churn_maxretry
+            actions = check_actions(
+                ctx.churn(ctx.record, submissions, payloads, memo)
             )
         except Exception as e:
             streak += 1
-            tb = traceback.format_exc()
-            logging.error(
-                "screendoor: churn raised (%d in a row):\n%s", streak, tb
-            )
-            ctx.write_dispatch_telemetry(
-                {
-                    "event": "churn_error",
-                    "streak": streak,
-                    "error": repr(e),
-                    "traceback": tb[-4000:],
-                },
-            )
-            if streak == 1:
-                data = {"dedupe_key": "churn_error"}
-                notify(ctx, "failure", f"churn raised: {e!r}", data)
-            if streak > ctx.record["churn_maxretry"]:
-                reason = f"churn raised {streak} consecutive ticks: {e!r}"
-                complete(ctx, "failed", reason=reason)
-                notify(ctx, "failure", "dispatch failed: churn keeps raising")
+            _record_churn_error(ctx, streak, e)
             break
         streak = 0
-        if not wrote_memo:
-            break
-    flush_batched_notifications(ctx, LEVELS)
+        if throttled:  # keep notifications and succeed / fail only
+            actions = [
+                a for a in actions if a["action"] not in ("launch", "memo")
+            ]
+        trials = fold_trial_events(submissions + payloads)
+        step = churn_step(memo, submissions)
+        if not apply_actions(ctx, actions, trials, memo, step):
+            break  # no memo written: nothing new for churn this tick
+    flush_batched_notifications(ctx)
     ctx.churn_error_streak = streak
     ctx.write_dispatch_telemetry(
         {

@@ -13,11 +13,11 @@ def main(argv=None) -> int:
         prog="python3 -m screendoor.trial.worker",
         description=format_cli_description(__doc__),
     )
-    parser.add_argument("--workdir", required=True)
+    parser.add_argument("--dispatchdir", required=True)
     parser.add_argument("--dispatch", required=True, help="dispatch_uuid")
     parser.add_argument("trials", nargs="+", help="trial_uuid or trial dir")
     args = parser.parse_args(argv)
-    return worker(args.workdir, args.dispatch, args.trials)
+    return worker(args.dispatchdir, args.dispatch, args.trials)
 
 
 if __name__ == "__main__":

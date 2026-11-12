@@ -13,7 +13,7 @@ NAMES = (
     "meta_experiment",
     "meta_treatment",
     "meta_user",
-    "meta_attempt",
+    "meta_redo",
 )
 
 # also stamped on every record, but an integer: seeds the churn decorator
@@ -22,6 +22,7 @@ SEED_NAME = "meta_seed"
 
 DEFAULTS = {
     **dict.fromkeys(NAMES, "default"),
+    "meta_redo": "0",
     "assay_kwargs": {},
     "trial_batchsize": 1,
     "trial_batch_timeout": None,
@@ -35,8 +36,8 @@ FILES = (
     "trial_submissions",
     "trial_payloads",
     "trial_telemetry",
-    "memo",
-    "notify",
+    "churn_memo",
+    "churn_notify",
 )
 
 # every dispatch must set each of these to an expression: none has a default
@@ -56,7 +57,7 @@ HOOK_NAMES = (
 
 # the daemon's own hooks, which belong to no dispatch: screendoor.json must
 # set each of these
-WORKDIR_HOOK_NAMES = (
+DISPATCHDIR_HOOK_NAMES = (
     *(
         f"how_{op}_dispatch_{f}"
         for f in ("submissions", "payloads", "telemetry")
@@ -72,45 +73,64 @@ class MissingHookError(ValueError):
     """A hook was not supplied; screendoor has no default for any."""
 
 
+class DispatchdirConfigError(ValueError):
+    """The dispatchdir's screendoor.json is missing, incomplete or wrong."""
+
+
 def missing_hooks(names, supplied: dict) -> list:
     return [name for name in names if name not in supplied]
 
 
+def _slug(value) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "-", str(value)).strip("-") or "-"
+
+
 def run_dir_name(record: dict, submitted_ts: str) -> str:
-    assay = record["assay"]
-    match = re.match(r"(?:scd|screendoor)\.assaylib\.(\w+)", assay)
-    short = match[1] if match else assay.rstrip("()").split(".")[-1]
-    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", short).strip("-") or "assay"
-    date = parse_iso(submitted_ts).date().isoformat()
-    uid = record["dispatch_uuid"].replace("-", "")[:8]
-    return f"assay={slug}+date={date}+uuid={uid}+what=screendoor"
+    """``project=<p>/date=<YYYY-MM-DD>+what=<experiment>%<treatment>%<seed>
+    +redo=<redo>``, from the dispatch's labels and submission date."""
+    r = {**DEFAULTS, **record}
+    date = parse_iso(submitted_ts).astimezone().date().isoformat()
+    what = "%".join(
+        _slug(r[k]) for k in ("meta_experiment", "meta_treatment", SEED_NAME)
+    )
+    return os.path.join(
+        f"project={_slug(r['meta_project'])}",
+        f"date={date}+what={what}+redo={_slug(r['meta_redo'])}",
+    )
 
 
-class WorkdirHooks:
-    """Daemon-level hooks, from the workdir's ``screendoor.json``.
+class DispatchdirHooks:
+    """Daemon-level hooks, from the dispatchdir's ``screendoor.json``.
 
-    The file must set every name in WORKDIR_HOOK_NAMES; each
+    The file must set every name in DISPATCHDIR_HOOK_NAMES; each
     ``how_<name>`` hook becomes the attribute ``<name>``.
     """
 
     dispatch_uuid = "daemon"  # how notifiers label the daemon's own messages
 
-    def __init__(self, workdir: str):
-        self.workdir = os.path.abspath(workdir)
-        path = os.path.join(self.workdir, "screendoor.json")
+    def __init__(self, dispatchdir: str):
+        self.dispatchdir = os.path.abspath(dispatchdir)
+        path = os.path.join(self.dispatchdir, "screendoor.json")
         try:
             with open(path, encoding="utf-8") as fh:
                 cfg = json.load(fh)
         except FileNotFoundError:
-            raise MissingHookError(
+            raise DispatchdirConfigError(
                 f"{path} is missing; it must set "
-                + ", ".join(WORKDIR_HOOK_NAMES)
+                + ", ".join(DISPATCHDIR_HOOK_NAMES)
             ) from None
-        missing = missing_hooks(WORKDIR_HOOK_NAMES, cfg)
+        missing = missing_hooks(DISPATCHDIR_HOOK_NAMES, cfg)
         if missing:
-            raise MissingHookError(f"{path} must set " + ", ".join(missing))
+            raise DispatchdirConfigError(
+                f"{path} must set " + ", ".join(missing)
+            )
+        unknown = sorted(set(cfg) - {*DISPATCHDIR_HOOK_NAMES, "eval_context"})
+        if unknown:
+            raise DispatchdirConfigError(
+                f"{path} has unknown keys: {', '.join(unknown)}"
+            )
         namespace = make_eval_namespace(cfg.get("eval_context"))
-        for name in WORKDIR_HOOK_NAMES:
+        for name in DISPATCHDIR_HOOK_NAMES:
             hook = eval_hook(cfg[name], namespace)
             setattr(self, name.removeprefix("how_"), hook)
 
@@ -120,18 +140,18 @@ class DispatchContext:
 
     def __init__(
         self,
-        workdir: str,
+        dispatchdir: str,
         record: dict,
         submitted_ts: str,
-        wdhooks: WorkdirHooks | None = None,
+        ddhooks: DispatchdirHooks | None = None,
     ):
-        self.workdir = os.path.abspath(workdir)
+        self.dispatchdir = os.path.abspath(dispatchdir)
         self.record = {**DEFAULTS, **record}
         self.dispatch_uuid = record["dispatch_uuid"]
         self.run_dir = os.path.join(
-            self.workdir, run_dir_name(record, submitted_ts)
+            self.dispatchdir, run_dir_name(record, submitted_ts)
         )
-        self.wdhooks = wdhooks or WorkdirHooks(workdir)
+        self.ddhooks = ddhooks or DispatchdirHooks(dispatchdir)
         # stamped on every record written for this dispatch
         self.labels = {
             "dispatch_uuid": self.dispatch_uuid,
@@ -180,12 +200,15 @@ class DispatchContext:
     def write_dispatch_payload(self, record: dict) -> dict:
         """Record how this dispatch ended: its ``completed`` event."""
         record = {**self.labels, **record}
-        return self.wdhooks.write_dispatch_payloads(self.workdir, record)
+        return self.ddhooks.write_dispatch_payloads(self.ddhooks, record)
 
     def write_dispatch_telemetry(self, record: dict) -> dict:
         """Record something that happened to this dispatch along the way."""
         record = {**self.labels, **record}
-        return self.wdhooks.write_dispatch_telemetry(self.workdir, record)
+        return self.ddhooks.write_dispatch_telemetry(self.ddhooks, record)
+
+    # every record goes through these, which stamp the dispatch's labels;
+    # the storage hooks just store it
 
     def read_trial_submissions(self) -> list:
         return self.hook("how_read_trial_submissions")(self)
@@ -193,30 +216,55 @@ class DispatchContext:
     def read_trial_payloads(self) -> list:
         return self.hook("how_read_trial_payloads")(self)
 
-    def read_trial_events(self) -> list:
-        """Every trial event, submissions then payloads, unfolded."""
-        return self.read_trial_submissions() + self.read_trial_payloads()
-
     def read_trials(self) -> list:
         """One dict per trial, folded from submissions and payloads."""
-        return fold_trial_events(self.read_trial_events())
+        subs, pays = self.read_trial_submissions(), self.read_trial_payloads()
+        return fold_trial_events(subs + pays)
+
+    def read_churn_memo_events(self) -> list:
+        """Memo events, oldest first, one per index (a crash can leave a
+        step's memo written twice)."""
+        by_index: dict = {}
+        events = self.hook("how_read_churn_memo")(self)
+        for e in sorted(events, key=lambda e: (e["index"], e["ts"])):
+            by_index.setdefault(e["index"], e)
+        return list(by_index.values())
+
+    def read_churn_memo(self) -> list:
+        """What churn sees as ``memo``: the memo payloads, oldest first."""
+        return [e["data"] for e in self.read_churn_memo_events()]
+
+    def read_churn_notify(self) -> list:
+        return self.hook("how_read_churn_notify")(self)
+
+    def _write(self, hook: str, record: dict) -> dict:
+        return self.hook(hook)(self, {**self.labels, **record})
 
     def write_trial_submission(self, record: dict) -> dict:
-        return self.hook("how_write_trial_submissions")(self, record)
+        return self._write("how_write_trial_submissions", record)
 
     def write_trial_payload(self, record: dict) -> dict:
-        return self.hook("how_write_trial_payloads")(self, record)
+        return self._write("how_write_trial_payloads", record)
+
+    def write_trial_telemetry(self, record: dict) -> dict:
+        return self._write("how_write_trial_telemetry", record)
+
+    def write_churn_memo(self, record: dict) -> dict:
+        return self._write("how_write_churn_memo", record)
+
+    def write_churn_notify(self, record: dict) -> dict:
+        return self._write("how_write_churn_notify", record)
 
     def log(self, msg: str, *args) -> None:
-        self.wdhooks.log_info(msg % args)
+        self.ddhooks.log_info(msg % args)
 
 
 def fold_dispatch_events(
-    workdir: str,
+    dispatchdir: str,
     submissions: list[dict],
     payloads: list[dict],
     telemetry: list[dict],
-    wdhooks: WorkdirHooks | None = None,
+    ddhooks: DispatchdirHooks | None = None,
 ) -> list[DispatchContext]:
     """Fold dispatch records into one DispatchContext each.
 
@@ -228,7 +276,7 @@ def fold_dispatch_events(
     for ev in submissions:
         if ev["event"] == "submitted" and ev["dispatch_uuid"] not in ctxs:
             ctxs[ev["dispatch_uuid"]] = DispatchContext(
-                workdir, ev["dispatch"], ev["ts"], wdhooks
+                dispatchdir, ev["dispatch"], ev["ts"], ddhooks
             )
     events = [*payloads, *telemetry]
     for ev in sorted(events, key=lambda e: parse_iso(e["ts"])):
@@ -253,11 +301,11 @@ def fold_dispatch_events(
     return list(ctxs.values())
 
 
-def load_dispatches(workdir: str) -> list[DispatchContext]:
-    wdhooks = WorkdirHooks(workdir)
-    submissions = wdhooks.read_dispatch_submissions(wdhooks.workdir)
-    payloads = wdhooks.read_dispatch_payloads(wdhooks.workdir)
-    telemetry = wdhooks.read_dispatch_telemetry(wdhooks.workdir)
+def load_dispatches(dispatchdir: str) -> list[DispatchContext]:
+    ddhooks = DispatchdirHooks(dispatchdir)
+    submissions = ddhooks.read_dispatch_submissions(ddhooks)
+    payloads = ddhooks.read_dispatch_payloads(ddhooks)
+    telemetry = ddhooks.read_dispatch_telemetry(ddhooks)
     return fold_dispatch_events(
-        workdir, submissions, payloads, telemetry, wdhooks
+        dispatchdir, submissions, payloads, telemetry, ddhooks
     )

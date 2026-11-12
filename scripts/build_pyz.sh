@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build the single-file screendoor.pyz attached to each release.
-# Run its worker as: python3 screendoor.pyz worker --workdir ... --dispatch ...
+# Run its worker as: python3 screendoor.pyz worker --dispatchdir ... --dispatch ...
 set -euo pipefail
 cd "$(dirname "$0")/.."
 version="$(python3 -c 'import screendoor; print(screendoor.__version__)')"
@@ -12,16 +12,10 @@ cat > "$stage/__main__.py" <<'PY'
 import runpy
 import sys
 
-COMMANDS = {
-    "worker": "screendoor.trial.worker",
-    "submit_dispatch": "screendoor.daemon.submit_dispatch",
-    "run_tick_once": "screendoor.daemon.run_tick_once",
-    "run_busyloop": "screendoor.daemon.run_busyloop",
-    "print_status": "screendoor.daemon.print_status",
-    "kill_dispatch": "screendoor.daemon.kill_dispatch",
-    "resume_dispatch": "screendoor.daemon.resume_dispatch",
-    "replay_dispatch": "screendoor.daemon.replay_dispatch",
-}
+from screendoor.__main__ import COMMANDS as MODULES
+
+# short names: the module's last part, e.g. worker, submit_daemon
+COMMANDS = {m.rsplit(".", 1)[-1]: m for m in MODULES}
 if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
     sys.exit(f"usage: screendoor.pyz {{{','.join(COMMANDS)}}} ...")
 module = COMMANDS[sys.argv.pop(1)]

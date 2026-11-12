@@ -1,6 +1,6 @@
 import pytest
 
-from screendoor.testing import FakeClock, write_workdir_hooks
+from screendoor.testing import FakeClock, write_dispatchdir_hooks
 
 
 @pytest.fixture
@@ -10,8 +10,8 @@ def clock():
 
 
 @pytest.fixture
-def workdir(tmp_path):
-    """A workdir whose screendoor.json sets every daemon hook."""
+def dispatchdir(tmp_path):
+    """A dispatchdir whose screendoor.json sets every daemon hook."""
     path = str(tmp_path / "wd")
-    write_workdir_hooks(path)
+    write_dispatchdir_hooks(path)
     return path

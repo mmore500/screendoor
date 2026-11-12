@@ -4,7 +4,8 @@ from . import _run_slurm_command as _rsc
 
 
 def throttle(*, max_jobs: int):
-    """Pass while your job count in ``squeue --me`` is below ``max_jobs``."""
+    """Pass while fewer than ``max_jobs`` of your jobs are queued or
+    running, counting each array task, of any job, as one."""
 
     def throttle(ctx) -> bool:
         try:

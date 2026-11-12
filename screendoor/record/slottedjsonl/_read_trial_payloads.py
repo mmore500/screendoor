@@ -1,7 +1,8 @@
 from ...auxlib._read_jsonl_tolerant import read_jsonl_tolerant
 from ..appendjsonl._files import path
 from ._read import read
-from ._trial_slots import file_slot, resolve_slot, slots_path
+from ._resolve_slot import file_slot, resolve_slot
+from ._trial_slots import slots_path
 
 
 def read_trial_payloads(*, slot_bytes: int | None = None):

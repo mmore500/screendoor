@@ -7,10 +7,7 @@ import sys
 import pytest
 
 from screendoor.assaylib import skeletonization
-from screendoor.assaylib.skeletonization._engine._codec import (
-    decode_sites,
-    encode_sites,
-)
+from screendoor.auxlib import decode_sites, encode_sites
 from screendoor.auxlib._DispatchContext import load_dispatches
 from screendoor.testing import simulate_dispatch
 
@@ -69,7 +66,7 @@ def test_churn_is_pure_and_replayable(policy):
         "dispatch_uuid": r["dispatch_uuid"],
     }
     churn = getattr(skeletonization, policy).churn
-    (ctx,) = load_dispatches(r["workdir"])
+    (ctx,) = load_dispatches(r["dispatchdir"])
     subs, pays = ctx.read_trial_submissions(), ctx.read_trial_payloads()
     a1 = churn(d, subs, pays, [])
     a2 = churn(d, subs[::-1], pays[::-1], [])
@@ -103,7 +100,7 @@ def test_rel_tol_and_tasks_and_replicates():
     kept = decode_sites(s["retained"])
     assert {0, 5} <= kept
     assert len(kept) == 12 - 3  # 3% loss allowed, 4% is not
-    assert {t["key"]["rep"] for t in r["trials"]} == {0, 1}
+    assert {t["key"]["replicate"] for t in r["trials"]} == {0, 1}
 
 
 def test_trial_failure_fails_dispatch_or_rejects():
@@ -148,7 +145,7 @@ def test_first_wave_launches_with_baseline():
     }
     (launch, progress) = skeletonization.hybrid.churn(d, [], [], [])
     keys = [t["key"] for t in launch["kwargs"]["trials"]]
-    assert {"g": "0-15", "rep": 0} in keys  # wildtype reference
+    assert {"retained": "0-15", "replicate": 0} in keys  # wildtype
     assert len(keys) == 9
     assert progress["action"] == "progress"
 
@@ -188,3 +185,24 @@ def test_matches_2026_11_03_implementation(kind, n, b, seed, policy):
     assert decode_sites(s["retained"]) == ref.retained
     assert s["proposal_batches"] == ref.proposal_batches
     assert s["certified"] == ref.certified
+
+
+def test_bare_number_results_are_scores():
+    need = frozenset({2, 5})
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.hybrid",
+        {"n_sites": 8, "cmd": "x", "batch_size": 4, "rel_tol": 0.1},
+        fake_trial=lambda t: float(need <= decode_sites(t["env"]["retained"])),
+    )
+    assert r["completed"]["outcome"] == "succeeded"
+    assert decode_sites(r["completed"]["summary"]["retained"]) == need
+
+
+def test_result_without_score_fails_the_dispatch():
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.ddmin",
+        {"n_sites": 4, "cmd": "x"},
+        fake_trial=lambda t: {"viable": True},
+    )
+    assert r["completed"]["outcome"] == "failed"
+    assert "lacks ['score']" in r["completed"]["reason"]

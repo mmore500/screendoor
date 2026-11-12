@@ -10,7 +10,7 @@ import pytest
 from screendoor.auxlib._DispatchContext import load_dispatches
 from screendoor.record import lockedjsonl as lj
 from screendoor.record.lockedjsonl._files import append, read_events
-from screendoor.testing import simulate_dispatch, write_workdir_hooks
+from screendoor.testing import simulate_dispatch, write_dispatchdir_hooks
 
 
 def _hold_lock(path, ready, release):
@@ -109,14 +109,14 @@ LOCKED = {
         "trial_submissions",
         "trial_payloads",
         "trial_telemetry",
-        "memo",
-        "notify",
+        "churn_memo",
+        "churn_notify",
     )
 } | {"how_prep_trial_payloads": "scd.record.lockedjsonl.prep_trial_payloads()"}
 
 
 def test_dispatch_recorded_through_locked_hooks(tmp_path):
-    write_workdir_hooks(
+    write_dispatchdir_hooks(
         str(tmp_path),
         **{
             f"how_{op}_dispatch_{f}": f"scd.record.lockedjsonl."
@@ -132,7 +132,7 @@ def test_dispatch_recorded_through_locked_hooks(tmp_path):
             "cmd": 'echo "!!!screendoor:telemetry $i"; '
             'echo "!!!screendoor:payload $((i + 1))"',
         },
-        workdir=str(tmp_path),
+        dispatchdir=str(tmp_path),
         **LOCKED,
     )
     assert r["completed"]["outcome"] == "succeeded"

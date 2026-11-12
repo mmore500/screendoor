@@ -8,7 +8,8 @@ from ._procs import job_dir, read_pidfile
 
 
 def launch(*, worker: str | None = None, pidfile_wait_s: float = 30.0):
-    """Run each batch as a detached local process, under ``timeout``.
+    """Run each batch as a detached local process, under coreutils
+    ``timeout`` if ``trial_batch_timeout`` is set.
 
     Batch ``i`` of job ``name`` writes ``jobs/<name>/<i>.pid`` in the run
     directory as it starts, which is how poke, kill and throttle find it.
@@ -38,7 +39,7 @@ def launch(*, worker: str | None = None, pidfile_wait_s: float = 30.0):
             )
             script = (
                 f"( {stamp} > {q}.tmp && mv {q}.tmp {q} && "
-                f"exec {prefix}{worker} --workdir {shlex.quote(ctx.workdir)} "
+                f"exec {prefix}{worker} --dispatchdir {shlex.quote(ctx.dispatchdir)} "
                 f"--dispatch {ctx.dispatch_uuid} {uuids} "
                 f") </dev/null >>{log} 2>&1 &"
             )

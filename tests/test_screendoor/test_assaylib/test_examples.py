@@ -61,7 +61,7 @@ def test_naive_scan_one_timepoint_at_a_time():
     }
     pending = [scan(10, 0, result=False), scan(10, 1, "running")]
     assert kinds(scan_churn(SCAN, *records(*pending), [])) == ["progress"]
-    none = [scan(10, 0, result=False), scan(10, 1, result={"success": False})]
+    none = [scan(10, 0, result=False), scan(10, 1, result={"accept": False})]
     launch, _ = scan_churn(SCAN, *records(*none), [])
     assert {t["key"]["timepoint"] for t in launch["kwargs"]["trials"]} == {20}
 
@@ -71,7 +71,7 @@ def test_naive_scan_stops_at_first_success():
         scan(10, 0, result=False),
         scan(10, 1, result=False),
         scan(20, 0, result=False),
-        scan(20, 1, result={"success": True, "generations": 900}),
+        scan(20, 1, result={"accept": True, "generations": 900}),
     ]
     (a,) = scan_churn(SCAN, *records(*trials), [])
     assert a["action"] == "succeed"
@@ -108,7 +108,7 @@ def test_naive_scan_simulated():
             "cmd": "x",
         },
         fake_trial=lambda t: {
-            "success": t["env"]["timepoint"] >= "gen600"
+            "accept": t["env"]["timepoint"] >= "gen600"
             and t["env"]["replicate"] == "2"
         },
     )
@@ -119,14 +119,14 @@ def test_naive_scan_simulated():
 
 def test_jenga_simulated():
     r = simulate_dispatch(
-        "scd.assaylib.skeletonization.naive_jenga",
-        {"components": list("abcdefgh"), "cmd": "x", "width": 3},
+        "scd.assaylib.skeletonization.jenga",
+        {"components": list("abcdefgh"), "cmd": "x", "batch_size": 3},
         fake_trial=lambda t: {
-            "passes": {"b", "g"} <= set(t["env"]["components"].split())
+            "accept": {"b", "g"} <= set(t["env"]["components"].split())
         },
     )
     assert r["completed"]["outcome"] == "succeeded"
-    assert r["completed"]["summary"]["skeleton"] == ["b", "g"]
+    assert r["completed"]["summary"]["retained"] == ["b", "g"]
     assert r["memo"][-1]["round"] == r["completed"]["summary"]["rounds"]
 
 
@@ -143,3 +143,12 @@ def test_exercise_pure_failure():
     d = {"assay_kwargs": {"n": 2}}
     trials = [trial({"i": 0}), trial({"i": 1}, "failed")]
     assert kinds(ex_churn(d, *records(*trials), [])) == ["fail"]
+
+
+def test_jenga_takes_bare_true():
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.jenga",
+        {"components": list("abc"), "cmd": "x"},
+        fake_trial=lambda t: "b" in t["env"]["components"].split(),
+    )
+    assert r["completed"]["summary"]["retained"] == ["b"]

@@ -17,7 +17,7 @@ def launch(
     Array task i runs batch i, so a trial's job is its recorded name and
     index. ``sbatch_flags`` pass to sbatch verbatim, overriding the
     script's own ``#SBATCH`` lines. ``worker`` is the command that starts
-    the worker.
+    the worker on the compute node, where this interpreter may not exist.
     """
     if isinstance(sbatch_flags, str):
         sbatch_flags = shlex.split(sbatch_flags)

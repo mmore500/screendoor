@@ -2,7 +2,7 @@
 """Print a screendoor dispatch (JSON) that skeletonizes an Avida organism.
 
   python3 make_dispatch.py nand_50 --policy hybrid \\
-    | python3 -m screendoor.daemon.submit_dispatch - --workdir work
+    | python3 -m screendoor.daemon.submit_dispatch - --dispatchdir work
 
 Acceptance matches knockout_skeleton.AvidaExactOracle: viable, keeps every
 wildtype task, and fitness >= (1 - rel_tol) * wildtype fitness.
@@ -22,6 +22,19 @@ CMD = """\
 set -euo pipefail
 python3 "$AVIDA_EXAMPLE_DIR/avida_fitness.py" "$sequence"
 """
+
+
+def sequence_of(organism: str, organisms: dict) -> str:
+    """The genome named ``organism``, or ``organism`` itself if it is
+    spelled ``seq:<genome>``."""
+    if organism.startswith("seq:"):
+        return organism[len("seq:") :]
+    if organism not in organisms:
+        raise KeyError(
+            f"unknown organism {organism!r}: one of {sorted(organisms)}, "
+            "or seq:<genome>"
+        )
+    return organisms[organism]
 
 
 def make_dispatch(
@@ -53,7 +66,7 @@ def make_dispatch(
         or os.path.join(OLD, "vendor/avida/avida-core/support/config")
     )
     kwargs = {
-        "sequence": organisms.get(organism, organism),
+        "sequence": sequence_of(organism, organisms),
         "nop_symbol": "A",
         "cmd": CMD,
         "batch_size": batch_size,
@@ -72,7 +85,7 @@ def make_dispatch(
         "meta_experiment": "default",
         "meta_treatment": "default",
         "meta_user": subprocess.check_output(["id", "-un"], text=True).strip(),
-        "meta_attempt": subprocess.check_output(["date"], text=True).strip(),
+        "meta_redo": "0",
         "assay": "scd.churn.seed_global_rngs("
         f"scd.assaylib.skeletonization.{policy})",
         "assay_kwargs": kwargs,
@@ -88,10 +101,10 @@ def make_dispatch(
         "how_prep_trial_payloads": "scd.record.appendjsonl.prep_trial_payloads()",
         "how_read_trial_telemetry": "scd.record.appendjsonl.read_trial_telemetry()",
         "how_write_trial_telemetry": "scd.record.appendjsonl.write_trial_telemetry()",
-        "how_read_memo": "scd.record.appendjsonl.read_memo()",
-        "how_write_memo": "scd.record.appendjsonl.write_memo()",
-        "how_read_notify": "scd.record.appendjsonl.read_notify()",
-        "how_write_notify": "scd.record.appendjsonl.write_notify()",
+        "how_read_churn_memo": "scd.record.appendjsonl.read_churn_memo()",
+        "how_write_churn_memo": "scd.record.appendjsonl.write_churn_memo()",
+        "how_read_churn_notify": "scd.record.appendjsonl.read_churn_notify()",
+        "how_write_churn_notify": "scd.record.appendjsonl.write_churn_notify()",
         "how_notify_progress": "scd.notify.log.notify()",
         "how_notify_eta": "scd.notify.log.notify()",
         "how_notify_success": "scd.notify.log.notify()",
@@ -124,7 +137,7 @@ def main() -> int:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter
     )
-    p.add_argument("organism", help="name in organisms.json, or a sequence")
+    p.add_argument("organism", help="name in organisms.json, or seq:<genome>")
     p.add_argument(
         "--policy",
         default="hybrid",
@@ -141,8 +154,8 @@ def main() -> int:
     p.add_argument("--max-procs", type=int, default=8)
     p.add_argument("--trial-batchsize", type=int, default=1)
     a = p.parse_args()
-    json.dump(
-        make_dispatch(
+    try:
+        dispatch = make_dispatch(
             a.organism,
             policy=a.policy,
             batch_size=a.batch_size,
@@ -153,10 +166,10 @@ def main() -> int:
             orchestrator=a.orchestrator,
             max_procs=a.max_procs,
             trial_batchsize=a.trial_batchsize,
-        ),
-        sys.stdout,
-        indent=2,
-    )
+        )
+    except KeyError as e:
+        p.error(e.args[0])
+    json.dump(dispatch, sys.stdout, indent=2)
     print()
     return 0
 

@@ -14,11 +14,18 @@ def main(argv=None) -> int:
         description=format_cli_description(__doc__),
     )
     parser.add_argument(
-        "dispatch", nargs="*", help="dispatch_uuid (default: every killed one)"
+        "dispatch",
+        nargs="*",
+        help="dispatch_uuid, or a prefix of one (default: every killed one)",
     )
-    parser.add_argument("--workdir", default=".")
+    parser.add_argument("--dispatchdir", default=".")
     args = parser.parse_args(argv)
-    for dispatch_uuid in resume_dispatch(args.workdir, args.dispatch):
+    try:
+        resumed = resume_dispatch(args.dispatchdir, args.dispatch)
+    except LookupError as e:
+        print(f"screendoor: {e.args[0]}", file=sys.stderr)
+        return 2
+    for dispatch_uuid in resumed:
         print(dispatch_uuid)
     return 0
 

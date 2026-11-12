@@ -89,7 +89,7 @@ def slurm(monkeypatch):
     return fake
 
 
-def _submit(workdir, **kw):
+def _submit(dispatchdir, **kw):
     return submit_dispatch(
         {
             "assay": "scd.assaylib.testing.exercise",
@@ -105,13 +105,13 @@ def _submit(workdir, **kw):
             "how_throttle_churn": "scd.orch.slurm.throttle(max_jobs=500)",
             **kw,
         },
-        workdir,
+        dispatchdir,
     )
 
 
-def test_array_submission_and_rendering(workdir, clock, slurm):
-    _submit(workdir)
-    run_tick_once(workdir)
+def test_array_submission_and_rendering(dispatchdir, clock, slurm):
+    _submit(dispatchdir)
+    run_tick_once(dispatchdir)
     (sb,) = [c for c in slurm.calls if c[0] == "sbatch"]
     assert sb[:4] == [
         "sbatch",
@@ -125,8 +125,8 @@ def test_array_submission_and_rendering(workdir, clock, slurm):
     assert "#SBATCH --job-name=screendoor-" in script
     assert 'cp "$0" ~/slurmscripts/"$SLURM_JOB_ID".sh' in script
     assert "tee -a ~/slurmlogs/" in script
-    assert "python3 -m screendoor.trial.worker --workdir" in script
-    (ctx,) = load_dispatches(workdir)
+    assert "python3 -m screendoor.trial.worker --dispatchdir" in script
+    (ctx,) = load_dispatches(dispatchdir)
     trials = ctx.read_trials()
     (name,) = {t["job"]["name"] for t in trials}
     assert f"#SBATCH --job-name={name}" in script
@@ -135,18 +135,18 @@ def test_array_submission_and_rendering(workdir, clock, slurm):
     assert indices == [0, 0, 1, 1, 2]  # batches of 2, 2 and 1
 
 
-def test_one_squeue_per_tick_and_relaunch(workdir, clock, slurm):
-    _submit(workdir)
-    run_tick_once(workdir)
+def test_one_squeue_per_tick_and_relaunch(dispatchdir, clock, slurm):
+    _submit(dispatchdir)
+    run_tick_once(dispatchdir)
     slurm.calls.clear()
     clock.sleep(61)
-    run_tick_once(workdir)  # still queued: nothing to do
+    run_tick_once(dispatchdir)  # still queued: nothing to do
     assert slurm.count("squeue") == 2  # one poke + one throttle check
     del slurm.queue["1000_1"]  # preempted, no result
     slurm.calls.clear()
     clock.sleep(61)
-    run_tick_once(workdir)
-    (ctx,) = load_dispatches(workdir)
+    run_tick_once(dispatchdir)
+    (ctx,) = load_dispatches(dispatchdir)
     trials = ctx.read_trials()
     relaunched = [t for t in trials if t["attempt"] == 1]
     assert len(relaunched) == 2  # both trials of batch 1
@@ -156,65 +156,67 @@ def test_one_squeue_per_tick_and_relaunch(workdir, clock, slurm):
     assert slurm.count("sbatch") == 1
 
 
-def test_throttle(workdir, clock, slurm):
+def test_throttle(dispatchdir, clock, slurm):
     slurm.queue.update({f"9_{i}": ("other", i) for i in range(3)})
-    _submit(workdir, how_throttle_churn="scd.orch.slurm.throttle(max_jobs=3)")
-    run_tick_once(workdir)
+    _submit(
+        dispatchdir, how_throttle_churn="scd.orch.slurm.throttle(max_jobs=3)"
+    )
+    run_tick_once(dispatchdir)
     assert slurm.count("sbatch") == 0
 
 
-def test_job_lost_in_a_crash_is_relaunched(workdir, clock, slurm):
-    _submit(workdir)
+def test_job_lost_in_a_crash_is_relaunched(dispatchdir, clock, slurm):
+    _submit(dispatchdir)
     slurm.die_on_sbatch = True  # submissions recorded, job never queued
     with pytest.raises(KeyboardInterrupt):
-        run_tick_once(workdir)
+        run_tick_once(dispatchdir)
     slurm.die_on_sbatch = False
     clock.sleep(61)
-    run_tick_once(workdir)  # poke finds no job by the recorded name
-    (ctx,) = load_dispatches(workdir)
+    run_tick_once(dispatchdir)  # poke finds no job by the recorded name
+    (ctx,) = load_dispatches(dispatchdir)
     trials = ctx.read_trials()
     assert {(t["status"], t["attempt"]) for t in trials} == {("requested", 1)}
     assert len(slurm.scripts) == 1 and len(slurm.queue) == 3
     clock.sleep(61)
-    run_tick_once(workdir)  # now queued: nothing relaunched
+    run_tick_once(dispatchdir)  # now queued: nothing relaunched
     assert len(slurm.scripts) == 1
 
 
-def test_kill_cancels_jobs_and_resume_relaunches(workdir, clock, slurm):
-    _submit(workdir, how_kill="scd.orch.slurm.kill()")
-    run_tick_once(workdir)
-    kill_dispatch(workdir)
+def test_kill_cancels_jobs_and_resume_relaunches(dispatchdir, clock, slurm):
+    _submit(dispatchdir, how_kill="scd.orch.slurm.kill()")
+    run_tick_once(dispatchdir)
+    kill_dispatch(dispatchdir)
     (scancel,) = [c for c in slurm.calls if c[0] == "scancel"]
     assert scancel[1:] == ["1000_0", "1000_1", "1000_2"]
     assert not slurm.queue
     clock.sleep(61)
-    assert run_tick_once(workdir) == [] and slurm.count("sbatch") == 1
-    resume_dispatch(workdir)
-    run_tick_once(workdir)
+    assert run_tick_once(dispatchdir) == [] and slurm.count("sbatch") == 1
+    resume_dispatch(dispatchdir)
+    run_tick_once(dispatchdir)
     assert slurm.count("sbatch") == 2
-    (ctx,) = load_dispatches(workdir)
+    (ctx,) = load_dispatches(dispatchdir)
     trials = ctx.read_trials()
     assert {(t["status"], t["attempt"], t["kills"]) for t in trials} == {
         ("requested", 1, 1)
     }
 
 
-def test_positional_hook_call_fails_at_setup(workdir, clock, slurm):
-    _submit(workdir, how_throttle_churn="scd.orch.slurm.throttle(5)")
-    run_tick_once(workdir)
-    (ctx,) = load_dispatches(workdir)
+def test_positional_hook_call_fails_at_setup(dispatchdir, clock, slurm):
+    _submit(dispatchdir, how_throttle_churn="scd.orch.slurm.throttle(5)")
+    run_tick_once(dispatchdir)
+    (ctx,) = load_dispatches(dispatchdir)
     (setup,) = [
         e
-        for e in ctx.wdhooks.read_dispatch_telemetry(workdir)
+        for e in ctx.ddhooks.read_dispatch_telemetry(ctx.ddhooks)
         if e["event"] == "setup"
     ]
     assert "error" in setup["hooks"]["how_throttle_churn"]
 
 
-def test_daemon_chain(workdir, clock, slurm):
-    assert submit_daemon(workdir) is None  # nothing open: no chain
-    _submit(workdir)
-    jid = submit_daemon(workdir, sbatch_flags="--partition=x")
+def test_daemon_chain(dispatchdir, clock, slurm):
+    assert submit_daemon(dispatchdir) is None  # nothing open: no chain
+    _submit(dispatchdir)
+    jid = submit_daemon(dispatchdir, sbatch_flags="--partition=x")
     assert jid == "1000"
     script = slurm.scripts[1000]
     assert "--dependency" not in script  # timed by --begin alone
@@ -226,35 +228,37 @@ def test_daemon_chain(workdir, clock, slurm):
     ):
         assert needle in script
     assert script == render_daemon_sbatch(
-        workdir, python=default_python_command(), sbatch_flags="--partition=x"
+        dispatchdir,
+        python=default_python_command(),
+        sbatch_flags="--partition=x",
     )
     (sbatch,) = [c for c in slurm.calls if c[0] == "sbatch"]
     assert f"--begin={slurm_time(now())}" in sbatch  # due now: never ticked
 
 
-def test_successor_begins_when_next_due(workdir, clock, slurm):
-    _submit(workdir, schedule="*/5 * * * *")
+def test_successor_begins_when_next_due(dispatchdir, clock, slurm):
+    _submit(dispatchdir, schedule="*/5 * * * *")
     # queued by a daemon job about to tick the due dispatch: the successor
     # begins at the following firing, not when this job ends
-    submit_daemon(workdir, successor=True)
+    submit_daemon(dispatchdir, successor=True)
     (sbatch,) = [c for c in slurm.calls if c[0] == "sbatch"]
     t = now()
     due = t.replace(second=0, microsecond=0) + datetime.timedelta(
         minutes=5 - t.minute % 5
     )
     assert f"--begin={slurm_time(due)}" in sbatch
-    run_tick_once(workdir)  # once ticked, the next firing is the same
+    run_tick_once(dispatchdir)  # once ticked, the next firing is the same
     slurm.calls.clear()
-    submit_daemon(workdir, successor=True)
+    submit_daemon(dispatchdir, successor=True)
     (sbatch,) = [c for c in slurm.calls if c[0] == "sbatch"]
     assert f"--begin={slurm_time(due)}" in sbatch
 
 
-def test_cancel_chain_only_when_nothing_is_active(workdir, clock, slurm):
-    _submit(workdir)
-    submit_daemon(workdir)  # queues the daemon job, as 1000_0
-    cancel_chain(workdir)
+def test_cancel_chain_only_when_nothing_is_active(dispatchdir, clock, slurm):
+    _submit(dispatchdir)
+    submit_daemon(dispatchdir)  # queues the daemon job, as 1000_0
+    cancel_chain(dispatchdir)
     assert slurm.count("scancel") == 0
-    kill_dispatch(workdir)
-    cancel_chain(workdir)
+    kill_dispatch(dispatchdir)
+    cancel_chain(dispatchdir)
     assert slurm.calls[-1] == ["scancel", "1000_0"]

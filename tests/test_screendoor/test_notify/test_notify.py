@@ -76,3 +76,19 @@ def test_batched(monkeypatch):
     assert b"x2" in bodies[0]
     hist.append({**ev, "ts": NOW.isoformat()})
     assert n.flush(Ctx(), "warning", hist, NOW) == []
+
+
+def test_batched_resends_what_a_failed_digest_held(monkeypatch):
+    monkeypatch.setenv("PUSHOVER_USER", "u")
+    monkeypatch.setenv("PUSHOVER_TOKEN", "t")
+    bodies = []
+    monkeypatch.setattr(_send, "_post", lambda url, body: bodies.append(body))
+    n = pushover.notify_batched(interval_s=3600)
+    hist = [
+        h("queued", 200, message="early", dedupe_key="e"),
+        h("send_failed", 150, message="early", digest=True),
+        h("queued", 100, message="later", dedupe_key="l"),
+    ]
+    (ev,) = n.flush(Ctx(), "warning", hist, NOW)
+    assert ev["event"] == "sent"
+    assert b"early" in bodies[0] and b"later" in bodies[0]

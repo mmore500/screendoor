@@ -14,9 +14,11 @@ def main(argv=None) -> int:
         description=format_cli_description(__doc__),
     )
     parser.add_argument(
-        "dispatch", nargs="*", help="dispatch_uuid (default: every open one)"
+        "dispatch",
+        nargs="*",
+        help="dispatch_uuid, or a prefix of one (default: every open one)",
     )
-    parser.add_argument("--workdir", default=".")
+    parser.add_argument("--dispatchdir", default=".")
     parser.add_argument(
         "--slurm",
         action="store_true",
@@ -24,12 +26,17 @@ def main(argv=None) -> int:
         "left active",
     )
     args = parser.parse_args(argv)
-    for dispatch_uuid in kill_dispatch(args.workdir, args.dispatch):
+    try:
+        killed = kill_dispatch(args.dispatchdir, args.dispatch)
+    except LookupError as e:
+        print(f"screendoor: {e.args[0]}", file=sys.stderr)
+        return 2
+    for dispatch_uuid in killed:
         print(dispatch_uuid)
     if args.slurm:
         from .slurm._submit_daemon import cancel_chain
 
-        cancel_chain(args.workdir)
+        cancel_chain(args.dispatchdir)
     return 0
 
 

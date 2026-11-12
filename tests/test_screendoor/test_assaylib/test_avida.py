@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from screendoor.assaylib.skeletonization._engine._codec import decode_sites
+from screendoor.auxlib import decode_sites
 from screendoor.testing import simulate_dispatch
 
 REPO = os.path.dirname(

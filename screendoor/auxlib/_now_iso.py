@@ -19,8 +19,10 @@ def sleep(seconds: float) -> None:
 
 
 def now_iso() -> str:
-    """Current time as ISO-8601 with UTC offset."""
-    return now().isoformat()
+    """Current time in UTC as ISO-8601, to the microsecond, so that record
+    timestamps sort as strings."""
+    utc = now().astimezone(datetime.timezone.utc)
+    return utc.isoformat(timespec="microseconds")
 
 
 def parse_iso(ts: str) -> datetime.datetime:

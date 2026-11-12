@@ -1,13 +1,12 @@
 import json
 
 from ._read import read
-from ._slot import DEFAULT_SLOT
 
 
 def convert(
     path: str,
     out: str,
-    slot_bytes: int = DEFAULT_SLOT,
+    slot_bytes: int | None = None,
     with_index: bool = False,
 ) -> None:
     """Write the valid records to ``out`` as plain compact JSONL.

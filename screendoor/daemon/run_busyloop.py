@@ -15,11 +15,11 @@ def main(argv=None) -> int:
         prog="python3 -m screendoor.daemon.run_busyloop",
         description=format_cli_description(__doc__),
     )
-    parser.add_argument("--workdir", default=".")
+    parser.add_argument("--dispatchdir", default=".")
     args = parser.parse_args(argv)
-    begin_prod_logging(args.workdir)
+    begin_prod_logging(args.dispatchdir)
     install_usr1_handler()
-    run_busyloop(args.workdir)
+    run_busyloop(args.dispatchdir)
     return 0
 
 

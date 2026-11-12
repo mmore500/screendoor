@@ -1,4 +1,4 @@
-"""Tick every due open dispatch in a workdir once, then exit (cron mode)."""
+"""Tick every due open dispatch in a dispatchdir once, then exit (cron mode)."""
 
 import argparse
 import sys
@@ -15,16 +15,16 @@ def main(argv=None) -> int:
         prog="python3 -m screendoor.daemon.run_tick_once",
         description=format_cli_description(__doc__),
     )
-    parser.add_argument("--workdir", default=".")
+    parser.add_argument("--dispatchdir", default=".")
     parser.add_argument(
         "--force",
         action="store_true",
         help="tick open dispatches even if not yet due",
     )
     args = parser.parse_args(argv)
-    begin_prod_logging(args.workdir)
+    begin_prod_logging(args.dispatchdir)
     install_usr1_handler()
-    run_tick_once(args.workdir, force=args.force)
+    run_tick_once(args.dispatchdir, force=args.force)
     return 0
 
 

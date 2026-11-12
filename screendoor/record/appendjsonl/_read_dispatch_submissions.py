@@ -5,11 +5,11 @@ from ._files import DISPATCH_SUBMISSIONS_FILE
 
 
 def read_dispatch_submissions():
-    """Read every event in a workdir's dispatch_submissions.jsonl."""
+    """Read every event in the dispatchdir's dispatch_submissions.jsonl."""
 
-    def read_dispatch_submissions(workdir: str) -> list:
+    def read_dispatch_submissions(ddhooks) -> list:
         return read_jsonl_tolerant(
-            os.path.join(workdir, DISPATCH_SUBMISSIONS_FILE)
+            os.path.join(ddhooks.dispatchdir, DISPATCH_SUBMISSIONS_FILE)
         )
 
     return read_dispatch_submissions

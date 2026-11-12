@@ -1,69 +1,33 @@
-"""Replayable port of knockout_skeleton.search (2026-11-03): the ``ddmin``,
-``minesweeper`` and ``hybrid`` policies in exact-oracle mode.
+"""The machinery the knockout policies share, ported from
+knockout_skeleton.search (2026-11-03, exact-oracle mode).
 
-The search is a generator. Where the original awaited
+A search is a generator. Where the original awaited
 ``evaluator.evaluate_many``, it yields ``{"genotypes": [...], "fresh": n}``
-and is sent back ``{genotype: "accept" | "reject"}``. Churn can therefore
-replay the whole search from recorded trial results on every tick: the same
-seed and verdicts give the same trajectory.
+and is sent back ``{genotype: "accept" | "reject"}``, so churn can replay
+it from recorded trial results on every tick: the same seed and verdicts
+give the same trajectory. A genotype is the frozenset of retained sites; a
+mask is a set of sites to delete from the current genotype.
 
-A genotype is the frozenset of retained sites; a mask is a set of sites to
-delete from the current genotype.
+Subclasses give the policy as ``search()``, a generator returning pass,
+unresolved, recovered or exhausted_recovery; ``run()`` then sweeps
+singletons until no single deletion passes.
 """
 
 import math
 import random
 
-from ._memory import ProposalMemory, weighted_subset
-
-POLICIES = ("ddmin", "minesweeper", "hybrid")
-ACCEPT, REJECT, UNKNOWN = "accept", "reject", "unknown"
-
-
-def split(sites: list, k: int) -> list:
-    """Cut ``sites`` into ``k`` consecutive, near-equal chunks."""
-    m = len(sites)
-    return [frozenset(sites[i * m // k : (i + 1) * m // k]) for i in range(k)]
+from ....auxlib._weighted_subset import weighted_subset
+from ._ProposalMemory import ProposalMemory
+from ._masks import ACCEPT, UNKNOWN, singletons
 
 
-def singletons(sites) -> list:
-    return [frozenset([i]) for i in sites]
+class KnockoutSearch:
+    policy = ""  # each subclass names its policy
 
-
-def accepted_sites(outcomes: dict) -> list:
-    return sorted(i for d, v in outcomes.items() if v == ACCEPT for i in d)
-
-
-def minesweeper_stage2_segments(sites) -> list:
-    """The 26 multi-scale Stage-2 deletion segments (Rees-Garbutt 2020)."""
-    ordered = list(sites)
-    m = len(ordered)
-    raw = [frozenset(ordered)]
-    for frac in (0.90, 0.80, 0.70, 0.60):
-        k = max(1, min(m, round(frac * m)))
-        raw += [frozenset(ordered[:k]), frozenset(ordered[m - k :])]
-    for parts in (2, 3, 4, 8):
-        raw += split(ordered, parts)
-    return list(dict.fromkeys(filter(None, raw)))
-
-
-def multi_dose_probes(sites, batch_size: int, *, include_full=False) -> list:
-    """Pack a dose ladder (100%, 50%, 25%, 12.5%) into one batch."""
-    ordered = list(sites)
-    raw = [frozenset(ordered)] if include_full else []
-    raw += split(ordered, 2) + split(ordered, 4)
-    eighths = split(ordered, 8)
-    raw += [eighths[i] for i in (1, 6, 3, 4, 2, 5, 0, 7)]
-    probes = dict.fromkeys(seg for seg in raw if len(seg) >= 2)
-    return list(probes)[: max(0, batch_size)]
-
-
-class Search:
     def __init__(
         self,
         sites,
         *,
-        policy: str,
         batch_size: int,
         seed,
         combination_rounds: int = 2,
@@ -76,12 +40,9 @@ class Search:
         context_decay: float = 4.0,
         memory_strength: float = 4.0,
     ):
-        if policy not in POLICIES:
-            raise ValueError(f"unknown policy {policy!r}; use {POLICIES}")
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
         self.original = self.current = frozenset(sites)
-        self.policy = policy
         self.b = batch_size
         self.rng = random.Random(seed)
         self.combination_rounds = combination_rounds
@@ -294,187 +255,12 @@ class Search:
         self.commit(mask, reason)
         return mask, (yield from self.after_commit())
 
-    # -- policies --------------------------------------------------------
     def initial_chunks(self) -> int:
         size = self.initial_knockout_size
         if size is None:
             return 2
         return max(2, math.ceil(len(self.current) / size))
 
-    def partition_union(self, k: int, kind: str, *, sieve: bool = False):
-        """Generator: parallel partition-union delta debugging, starting
-        from ``k`` chunks. With ``sieve``, pivot to the bottom-up sieve
-        once chunks stop passing."""
-        while len(self.current) >= 2 and k < len(self.current):
-            small = self.exact and k >= 8 and len(self.current) <= 2 * self.b
-            if sieve and small:
-                return (yield from self.sieve())
-            m = len(self.current)
-            chunks = split(sorted(self.current), k)
-            pending = self.untried(chunks)
-            committed = False
-            for start in range(0, len(pending), self.b):
-                batch = [
-                    c
-                    for c in self.untried(pending[start : start + self.b])
-                    if c <= self.current
-                ]
-                if not batch:
-                    continue
-                outcomes = yield from self.test(batch, kind)
-                if self.stopped:
-                    return "unresolved"
-                if ACCEPT in outcomes.values():
-                    _, status = yield from self.take(outcomes, kind)
-                    if status != "pass":
-                        return status
-                    committed = True
-            if max(map(len, chunks)) <= 2:
-                break
-            pristine = self.exact or self.current == self.original
-            if committed:
-                k = max(2, 2 * sum(c <= self.current for c in chunks))
-            elif sieve and pending and k >= 4 and pristine:
-                return (yield from self.sieve())
-            else:
-                k = min(m, 2 * k)
-        return "pass"
-
-    def ddmin(self):
-        """Generator: parallel partition-union delta debugging."""
-        return (
-            yield from self.partition_union(self.initial_chunks(), "ddmin")
-        )
-
-    def minesweeper(self):
-        """Generator: 4-stage Minesweeper divide and conquer (Rees-Garbutt
-        2020)."""
-        # Every site is screened, as in the original under an exact oracle.
-        stage1 = yield from self.test_all(
-            singletons(sorted(self.current)), "minesweeper_stage1"
-        )
-        if self.stopped:
-            return "unresolved"
-        non_essential = accepted_sites(stage1)
-        full = frozenset(non_essential)
-        if len(non_essential) < 2:
-            if non_essential:
-                self.commit(full, "minesweeper_stage1")
-                return (yield from self.after_commit())
-            return "pass"
-
-        segments = self.untried(minesweeper_stage2_segments(non_essential))
-        stage2 = yield from self.test_all(
-            segments, "minesweeper_stage2", until=full
-        )
-        if ACCEPT in stage2.values():
-            _, status = yield from self.take(
-                stage2, "minesweeper_stage3", full
-            )
-            if status != "pass":
-                return status
-        if self.stopped:
-            return "unresolved"
-
-        while True:
-            rem = [i for i in non_essential if i in self.current]
-            if len(rem) < 2:
-                return "pass"
-            pending = self.untried(split(rem, min(8, len(rem))), 1)
-            if not pending:
-                return "pass"
-            outcomes = yield from self.test_all(pending, "minesweeper_stage4")
-            if self.stopped:
-                return "unresolved"
-            if ACCEPT not in outcomes.values():
-                return "pass"
-            _, status = yield from self.take(outcomes, "minesweeper_stage4")
-            if status != "pass":
-                return status
-
-    def sieve(self):
-        """Generator: bottom-up singleton sieve, then top-down reduction of
-        the non-essential sites."""
-        singles = self.untried(singletons(sorted(self.current)), 1)
-        if not singles:
-            return "pass"
-        stage1 = yield from self.test_all(singles, "hybrid_stage1")
-        if self.stopped:
-            return "unresolved"
-        non_essential = accepted_sites(stage1)
-        full = frozenset(non_essential)
-        if len(non_essential) < 2:
-            if non_essential:
-                self.commit(full, "hybrid_stage1")
-                return (yield from self.after_commit())
-            return "pass"
-
-        probes = multi_dose_probes(non_essential, self.b, include_full=True)
-        outcomes = yield from self.test(
-            self.untried(probes), "hybrid_subspace_probe"
-        )
-        if self.stopped:
-            return "unresolved"
-        if ACCEPT in outcomes.values():
-            _, status = yield from self.take(
-                outcomes, "hybrid_subspace_probe", full
-            )
-            if status != "pass":
-                return status
-
-        k = 4
-        while True:
-            rem = [i for i in non_essential if i in self.current]
-            m = len(rem)
-            if m < 2 or k >= m:
-                return "pass"
-            chunks = split(rem, k)
-            pending = self.untried(chunks)
-            mask = None
-            for start in range(0, len(pending), self.b):
-                outcomes = yield from self.test(
-                    pending[start : start + self.b], "hybrid_subspace_ddmin"
-                )
-                if self.stopped:
-                    return "unresolved"
-                if ACCEPT in outcomes.values():
-                    mask, status = yield from self.take(
-                        outcomes, "hybrid_subspace_ddmin"
-                    )
-                    if status != "pass":
-                        return status
-                    break
-            if mask is not None:
-                k = max(2, 2 * sum(not c <= mask for c in chunks))
-            elif max(map(len, chunks)) <= 2:
-                return "pass"
-            else:
-                k = min(m, 2 * k)
-
-    def hybrid(self):
-        """Generator: multi-dose pilot, then top-down ddmin with pivots to
-        the bottom-up sieve."""
-        sites = sorted(self.current)
-        m = len(sites)
-        k = self.initial_chunks()
-        if m >= 8 and self.b >= 6 and self.initial_knockout_size is None:
-            probes = self.untried(multi_dose_probes(sites, self.b))
-            if probes:
-                outcomes = yield from self.test(probes, "hybrid_dose_probe")
-                if self.stopped:
-                    return "unresolved"
-                if ACCEPT not in outcomes.values():
-                    return (yield from self.sieve())
-                mask, status = yield from self.take(
-                    outcomes, "hybrid_dose_probe"
-                )
-                if status != "pass":
-                    return status
-                finest = split(sites, 8 if m >= 16 and self.b >= 12 else 4)
-                k = max(2, 2 * sum(not c <= mask for c in finest))
-        return (yield from self.partition_union(k, "hybrid_ddmin", sieve=True))
-
-    # -- driver ----------------------------------------------------------
     def result(self, certified: bool, reason: str, unresolved=()) -> dict:
         return {
             "retained": self.current,
@@ -487,10 +273,10 @@ class Search:
         }
 
     def run(self):
-        """Generator: run the policy, then singleton sweeps until no single
+        """Generator: run ``search()``, then singleton sweeps until no single
         deletion passes. Returns the result dict (``StopIteration.value``).
         """
-        status = yield from getattr(self, self.policy)()
+        status = yield from self.search()
         if status in ("unresolved", "exhausted_recovery"):
             return self.result(False, status)
         while True:

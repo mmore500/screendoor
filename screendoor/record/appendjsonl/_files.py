@@ -2,7 +2,7 @@ import os
 
 from ...auxlib._append_jsonl_line import append_jsonl_line
 
-# a workdir's dispatch records: what was submitted, how it ended, and
+# a dispatchdir's dispatch records: what was submitted, how it ended, and
 # what happened along the way
 DISPATCH_SUBMISSIONS_FILE = "dispatch_submissions.jsonl"
 DISPATCH_PAYLOADS_FILE = "dispatch_payloads.jsonl"  # `completed` only
@@ -15,7 +15,5 @@ def path(ctx, name: str) -> str:
 
 def append(path: str, record: dict) -> dict:
     """Append ``record`` (a dict with "event"), stamping schema and ts."""
-    fields = {
-        k: v for k, v in record.items() if k not in ("schema", "ts", "event")
-    }
+    fields = {k: v for k, v in record.items() if k != "event"}
     return append_jsonl_line(path, record["event"], **fields)

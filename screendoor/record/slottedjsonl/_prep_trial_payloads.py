@@ -2,7 +2,8 @@ import contextlib
 
 from ._extend import extend
 from ._init import init
-from ._trial_slots import resolve_slot, slots_path
+from ._resolve_slot import resolve_slot
+from ._trial_slots import slots_path
 
 
 def prep_trial_payloads(*, slot_bytes: int | None = None):

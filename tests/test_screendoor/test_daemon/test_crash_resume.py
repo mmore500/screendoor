@@ -5,7 +5,7 @@ import collections
 
 import pytest
 
-from screendoor.assaylib.skeletonization._engine._codec import decode_sites
+from screendoor.auxlib import decode_sites
 from screendoor.auxlib._DispatchContext import load_dispatches
 from screendoor.testing import (
     FakeClock,
@@ -23,16 +23,16 @@ ASSAYS = [
         },
     ),
     (
-        "scd.assaylib.skeletonization.naive_jenga",
-        {"components": list("abcde"), "cmd": "x", "width": 2},
-        lambda t: {"passes": "c" in t["env"]["components"].split()},
+        "scd.assaylib.skeletonization.jenga",
+        {"components": list("abcde"), "cmd": "x", "batch_size": 2},
+        lambda t: {"accept": "c" in t["env"]["components"].split()},
     ),
 ]
 
 
-def max_repeats(workdir):
+def max_repeats(dispatchdir):
     """The most times any (trial, attempt) was submitted."""
-    (ctx,) = load_dispatches(workdir)
+    (ctx,) = load_dispatches(dispatchdir)
     counts = collections.Counter(
         (e["trial_uuid"], e["attempt"])
         for e in ctx.read_trial_submissions()
@@ -43,12 +43,12 @@ def max_repeats(workdir):
 
 @pytest.mark.parametrize("assay,kwargs,fake_trial", ASSAYS)
 def test_crash_everywhere(tmp_path, assay, kwargs, fake_trial):
-    def simulate(workdir, clock, **settings):
+    def simulate(dispatchdir, clock, **settings):
         return simulate_dispatch(
             assay,
             kwargs,
             fake_trial=fake_trial,
-            workdir=workdir,
+            dispatchdir=dispatchdir,
             clock=clock,
             **settings,
         )
@@ -61,17 +61,19 @@ def test_crash_everywhere(tmp_path, assay, kwargs, fake_trial):
     )
     assert n_appends > 20
     for crash_at in range(1, n_appends + 1):
-        workdir = str(tmp_path / f"crash{crash_at}")
+        dispatchdir = str(tmp_path / f"crash{crash_at}")
         with FakeClock() as clock:
             try:
                 with inject_crash_points(crash_at):
-                    simulate(workdir, clock)
+                    simulate(dispatchdir, clock)
             except InjectedCrash:
                 pass
             # resume; or, if the crash came while submitting, submit again
-            r = simulate(workdir, clock, submit=not load_dispatches(workdir))
+            r = simulate(
+                dispatchdir, clock, submit=not load_dispatches(dispatchdir)
+            )
         assert r["completed"] is not None, crash_at
         got = r["completed"]["summary"]
         for k in ("retained", "skeleton", "certified"):
             assert got.get(k) == want.get(k), (crash_at, k)
-        assert max_repeats(workdir) == 1, crash_at
+        assert max_repeats(dispatchdir) == 1, crash_at

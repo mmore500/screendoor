@@ -8,17 +8,17 @@ import json
 import os
 
 from ..auxlib._DispatchContext import (
+    DISPATCHDIR_HOOK_NAMES,
     FILES,
     HOOK_NAMES,
     LEVELS,
-    WORKDIR_HOOK_NAMES,
 )
 
 INLINE_HOOKS = {
     "how_launch": "scd.orch.inline.launch()",
     "how_poke": "scd.orch.inline.poke()",
     "how_kill": "scd.orch.inline.kill()",
-    "how_throttle_churn": "lambda *args, **kwargs: True",
+    "how_throttle_churn": "scd.orch.inline.throttle()",
     "how_setup": "scd.record.appendjsonl.setup()",
     **{f"how_notify_{lv}": "scd.notify.log.notify()" for lv in LEVELS},
     **{
@@ -34,7 +34,7 @@ INLINE_HOOKS = {
 }
 assert set(INLINE_HOOKS) == set(HOOK_NAMES)
 
-WORKDIR_HOOKS = {
+DISPATCHDIR_HOOKS = {
     **{
         f"how_{op}_dispatch_{f}": f"scd.record.appendjsonl.{op}_dispatch_{f}()"
         for f in ("submissions", "payloads", "telemetry")
@@ -44,14 +44,14 @@ WORKDIR_HOOKS = {
     "how_notify_liveness": "scd.notify.null.notify()",
     "how_notify_termination": "scd.notify.log.notify()",
 }
-assert set(WORKDIR_HOOKS) == set(WORKDIR_HOOK_NAMES)
+assert set(DISPATCHDIR_HOOKS) == set(DISPATCHDIR_HOOK_NAMES)
 
 
-def write_workdir_hooks(workdir: str, **overrides) -> str:
-    """Write ``<workdir>/screendoor.json`` with WORKDIR_HOOKS and
+def write_dispatchdir_hooks(dispatchdir: str, **overrides) -> str:
+    """Write ``<dispatchdir>/screendoor.json`` with DISPATCHDIR_HOOKS and
     ``overrides``; return its path."""
-    os.makedirs(workdir, exist_ok=True)
-    path = os.path.join(workdir, "screendoor.json")
+    os.makedirs(dispatchdir, exist_ok=True)
+    path = os.path.join(dispatchdir, "screendoor.json")
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump({**WORKDIR_HOOKS, **overrides}, fh, indent=2)
+        json.dump({**DISPATCHDIR_HOOKS, **overrides}, fh, indent=2)
     return path

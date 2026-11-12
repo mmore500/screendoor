@@ -2,12 +2,7 @@ import json
 
 from .... import churn as scd_churn
 from ....auxlib import canonical_json
-
-
-def _is_success(result) -> bool:
-    if isinstance(result, dict):
-        return bool(result.get("success"))
-    return result is True
+from ..._accepted import accepted
 
 
 def _env_value(timepoint) -> str:
@@ -26,7 +21,7 @@ def churn(dispatch, trial_submissions, trial_payloads, memo):
     * ``cmd`` and ``env``: the replay script, which gets ``$timepoint``
       (as JSON unless it is a string), ``$timepoint_index`` and
       ``$replicate``. It succeeds by sending ``true`` or
-      ``{"success": true, ...}`` as its result.
+      ``{"accept": true, ...}`` as its result.
     * ``max_failed``: trials that may fail or send no result, in all,
       before the dispatch fails (default 0); they count as no success.
 
@@ -46,6 +41,9 @@ def churn(dispatch, trial_submissions, trial_payloads, memo):
             {"timepoint": timepoint, "replicate": r} for r in range(replicates)
         ]
         found = [by_key.get(canonical_json(k)) for k in keys]
+        progress = scd_churn.progress(
+            index, len(timepoints), f"at {timepoint}"
+        )
         missing = [k for k, t in zip(keys, found) if t is None]
         if missing:
             return [
@@ -64,28 +62,26 @@ def churn(dispatch, trial_submissions, trial_payloads, memo):
                         for k in missing
                     ]
                 ),
-                scd_churn.progress(index, len(timepoints), f"at {timepoint}"),
+                progress,
             ]
         if any(t["state"] == "pending" for t in found):
-            return [scd_churn.progress(index, len(timepoints))]
+            return [progress]
 
-        failed = [
-            t
+        ok = [
+            t["result"]
             for t in found
-            if t["status"] != "succeeded" or t["result"] is None
+            if t["status"] == "succeeded" and t["result"] is not None
         ]
-        n_failed += len(failed)
+        n_failed += len(found) - len(ok)
         if n_failed > kw.get("max_failed", 0):
             return [scd_churn.fail(f"{n_failed} replays failed")]
-        successes = sum(
-            _is_success(t["result"]) for t in found if t not in failed
-        )
+        successes = sum(map(accepted, ok))
         scanned.append(
             {
                 "timepoint": timepoint,
                 "successes": successes,
                 "replicates": replicates,
-                "failed": len(failed),
+                "failed": len(found) - len(ok),
             }
         )
         if successes:

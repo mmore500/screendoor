@@ -2,7 +2,7 @@ import contextlib
 import os
 import signal
 
-from ._procs import is_alive, pidfile, read_pidfile
+from ._procs import live_pid, pidfile
 
 
 def kill():
@@ -11,9 +11,9 @@ def kill():
     def kill(ctx, trials: list) -> None:
         paths = {pidfile(ctx, t["job"]) for t in trials if t["job"]}
         for path in sorted(paths):
-            if not is_alive(path):
+            pid = live_pid(path)
+            if pid is None:
                 continue
-            pid, _ = read_pidfile(path)
             with contextlib.suppress(ProcessLookupError):
                 group = os.getpgid(pid)
                 if group == os.getpgid(0):  # never signal our own group

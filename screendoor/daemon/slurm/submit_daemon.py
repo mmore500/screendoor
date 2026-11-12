@@ -1,4 +1,4 @@
-"""Start (or extend) the Slurm daemon chain for a workdir."""
+"""Start (or extend) the Slurm daemon chain for a dispatchdir."""
 
 import argparse
 import sys
@@ -14,7 +14,7 @@ def main(argv=None) -> int:
         prog="python3 -m screendoor.daemon.slurm.submit_daemon",
         description=format_cli_description(__doc__),
     )
-    parser.add_argument("--workdir", default=".")
+    parser.add_argument("--dispatchdir", default=".")
     parser.add_argument(
         "--python",
         help="command that runs python with screendoor importable",
@@ -26,7 +26,7 @@ def main(argv=None) -> int:
         "--successor", action="store_true", help=argparse.SUPPRESS
     )
     args = parser.parse_args(argv)
-    begin_prod_logging(args.workdir)
+    begin_prod_logging(args.dispatchdir)
     job = submit_daemon(**vars(args))
     if job:
         print(job)

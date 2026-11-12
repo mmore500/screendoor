@@ -1,8 +1,7 @@
 import os
 
-from ...auxlib._append_jsonl_line import SCHEMA, _after_append_hooks
+from ...auxlib._append_jsonl_line import run_after_append_hooks, stamp
 from ...auxlib._canonical_json import canonical_json
-from ...auxlib._now_iso import now_iso
 from ...auxlib._read_jsonl_tolerant import parse_jsonl_tolerant
 from ..appendjsonl._files import (
     DISPATCH_PAYLOADS_FILE as DISPATCH_PAYLOADS_FILE,
@@ -24,11 +23,7 @@ def append(file: str, record: dict, timeout: float | None = None) -> dict:
     A last line left unterminated by a writer that died mid-write is ended
     first, so the new line is not spliced onto it.
     """
-    fields = {
-        k: v for k, v in record.items() if k not in ("schema", "ts", "event")
-    }
-    out = {"schema": SCHEMA, "ts": now_iso(), "event": record["event"]}
-    out.update(fields)
+    out = stamp(record)
     line = (canonical_json(out) + "\n").encode()
     os.makedirs(os.path.dirname(os.path.abspath(file)), exist_ok=True)
     flags = os.O_RDWR | os.O_APPEND | os.O_CREAT
@@ -39,8 +34,7 @@ def append(file: str, record: dict, timeout: float | None = None) -> dict:
         view = memoryview(line)
         while view:
             view = view[os.write(fd, view) :]
-    for hook in list(_after_append_hooks):
-        hook(file, out)
+    run_after_append_hooks(file, out)
     return out
 
 

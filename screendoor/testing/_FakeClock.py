@@ -22,6 +22,11 @@ class FakeClock:
     def sleep(self, seconds: float) -> None:
         self.t += datetime.timedelta(seconds=max(0.0, seconds))
 
+    @property
+    def active(self) -> bool:
+        """Whether the clock is entered, so screendoor runs in fake time."""
+        return self._saved is not None
+
     def __enter__(self):
         self._saved = dict(_now_iso._clock)
         _now_iso._clock.update(now=self.now, sleep=self.sleep)

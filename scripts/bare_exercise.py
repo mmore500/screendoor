@@ -21,7 +21,7 @@ dispatch = {
     "meta_experiment": "default",
     "meta_treatment": "default",
     "meta_user": subprocess.check_output(["id", "-un"], text=True).strip(),
-    "meta_attempt": subprocess.check_output(["date"], text=True).strip(),
+    "meta_redo": "0",
     "meta_seed": 1,
     "assay": "scd.churn.seed_global_rngs(scd.assaylib.testing.exercise)",
     "assay_kwargs": {"n": 4, "cmd": 'echo "!!!screendoor:payload $((i * i))"'},
@@ -39,10 +39,10 @@ dispatch = {
     "how_prep_trial_payloads": "scd.record.appendjsonl.prep_trial_payloads()",
     "how_read_trial_telemetry": "scd.record.appendjsonl.read_trial_telemetry()",
     "how_write_trial_telemetry": "scd.record.appendjsonl.write_trial_telemetry()",
-    "how_read_memo": "scd.record.appendjsonl.read_memo()",
-    "how_write_memo": "scd.record.appendjsonl.write_memo()",
-    "how_read_notify": "scd.record.appendjsonl.read_notify()",
-    "how_write_notify": "scd.record.appendjsonl.write_notify()",
+    "how_read_churn_memo": "scd.record.appendjsonl.read_churn_memo()",
+    "how_write_churn_memo": "scd.record.appendjsonl.write_churn_memo()",
+    "how_read_churn_notify": "scd.record.appendjsonl.read_churn_notify()",
+    "how_write_churn_notify": "scd.record.appendjsonl.write_churn_notify()",
     "how_notify_progress": "scd.notify.log.notify()",
     "how_notify_eta": "scd.notify.log.notify()",
     "how_notify_success": "scd.notify.log.notify()",
@@ -54,7 +54,7 @@ dispatch = {
     "how_cleanup_failure": "lambda *args, **kwargs: None",
 }
 # the daemon's own hooks
-WORKDIR_HOOKS = {
+DISPATCHDIR_HOOKS = {
     "how_read_dispatch_submissions": "scd.record.appendjsonl.read_dispatch_submissions()",
     "how_write_dispatch_submissions": "scd.record.appendjsonl.write_dispatch_submissions()",
     "how_read_dispatch_payloads": "scd.record.appendjsonl.read_dispatch_payloads()",
@@ -65,20 +65,20 @@ WORKDIR_HOOKS = {
     "how_notify_liveness": "scd.notify.null.notify()",
     "how_notify_termination": "scd.notify.log.notify()",
 }
-with tempfile.TemporaryDirectory() as workdir:
-    with open(os.path.join(workdir, "screendoor.json"), "w") as fh:
-        json.dump(WORKDIR_HOOKS, fh, indent=2)
+with tempfile.TemporaryDirectory() as dispatchdir:
+    with open(os.path.join(dispatchdir, "screendoor.json"), "w") as fh:
+        json.dump(DISPATCHDIR_HOOKS, fh, indent=2)
     run(
         "submit_dispatch",
         "-",
-        "--workdir",
-        workdir,
+        "--dispatchdir",
+        dispatchdir,
         input=json.dumps(dispatch),
     )
     for _ in range(100):
-        run("run_tick_once", "--workdir", workdir, "--force")
+        run("run_tick_once", "--dispatchdir", dispatchdir, "--force")
         (row,) = json.loads(
-            run("print_status", "--workdir", workdir, "--json")
+            run("print_status", "--dispatchdir", dispatchdir, "--json")
         )
         if row["state"] != "open":
             break

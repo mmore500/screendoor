@@ -6,6 +6,7 @@ import threading
 
 TAG = "!!!screendoor:"
 STDERR_TAIL_BYTES = 4000
+PIPE_GRACE_S = 10  # how long output may trail the script's exit
 
 
 def latest_request(submissions: list, trial_uuid: str) -> dict:
@@ -41,8 +42,7 @@ class _TagCollector:
         except ValueError:
             with self.lock:
                 self.malformed += 1
-            self.ctx.hook("how_write_trial_telemetry")(
-                self.ctx,
+            self.ctx.write_trial_telemetry(
                 {
                     "event": "malformed",
                     "trial_uuid": self.trial_uuid,
@@ -58,8 +58,7 @@ class _TagCollector:
             else:
                 self.channels.setdefault(channel, []).append(value)
         if channel == "telemetry":
-            self.ctx.hook("how_write_trial_telemetry")(
-                self.ctx,
+            self.ctx.write_trial_telemetry(
                 {
                     "event": "telemetry",
                     "trial_uuid": self.trial_uuid,
@@ -83,15 +82,19 @@ def _tail(path: str) -> str:
         return fh.read().decode(errors="replace")
 
 
-def run_trial(ctx, trial_uuid: str) -> None:
+def run_trial(ctx, trial_uuid: str, submissions: list | None = None) -> None:
     """Run one trial to completion and record how it ended.
 
     The script runs in a fresh temporary directory, deleted afterwards;
-    its ``cmd.sh`` and its stdout and stderr (per attempt) are kept in the
-    trial directory, ``$SCREENDOOR_TRIAL_DIR``. ``started`` goes to
-    telemetry; the trial payload is ``completed`` or ``failed``.
+    ``cmd.sh`` and, per attempt, ``attempt-<n>/stdout.txt`` and
+    ``stderr.txt`` are kept in the trial directory,
+    ``$SCREENDOOR_TRIAL_DIR``. ``started`` goes to trial telemetry; the
+    trial payload is ``completed`` or ``failed``. ``submissions`` saves
+    re-reading the trial submissions for each trial of a batch.
     """
-    request = latest_request(ctx.read_trial_submissions(), trial_uuid)
+    if submissions is None:
+        submissions = ctx.read_trial_submissions()
+    request = latest_request(submissions, trial_uuid)
     attempt = request["attempt"]
     cmd = request["request"]["cmd"]
     trial_dir = ctx.trial_dir(trial_uuid)
@@ -102,8 +105,7 @@ def run_trial(ctx, trial_uuid: str) -> None:
         "attempt": attempt,
         "task_id": request.get("task_id"),
     }
-    ctx.hook("how_write_trial_telemetry")(
-        ctx,
+    ctx.write_trial_telemetry(
         {
             "event": "started",
             **base,
@@ -114,8 +116,18 @@ def run_trial(ctx, trial_uuid: str) -> None:
     script = os.path.join(trial_dir, "cmd.sh")
     with open(script, "w", encoding="utf-8") as fh:
         fh.write(cmd if cmd.endswith("\n") else cmd + "\n")
-    with tempfile.TemporaryDirectory(prefix="screendoor-trial-") as scratch:
-        code, collector = _run_script(ctx, request, script, scratch)
+    with tempfile.TemporaryDirectory(
+        prefix="screendoor-trial-", ignore_cleanup_errors=True
+    ) as scratch:
+        env = {
+            **os.environ,
+            **request["request"]["env"],
+            "SCREENDOOR_TRIAL_DIR": trial_dir,
+            "SCREENDOOR_DISPATCHDIR": ctx.dispatchdir,
+            "SCREENDOOR_ATTEMPT": str(attempt),
+        }
+        collector = _TagCollector(ctx, trial_uuid, attempt)
+        code = _run_script(script, scratch, env, attempt_dir, collector)
     base.update(channels=collector.channels, malformed=collector.malformed)
     if code == 0:
         ctx.write_trial_payload(
@@ -128,47 +140,33 @@ def run_trial(ctx, trial_uuid: str) -> None:
                 **base,
                 "kind": "error",
                 "exit_code": code,
-                "stderr_tail": _tail(_attempt_path(ctx, request, "stderr")),
+                "stderr_tail": _tail(os.path.join(attempt_dir, "stderr.txt")),
             },
         )
 
 
-def _attempt_path(ctx, request: dict, stream: str) -> str:
-    attempt_dir = os.path.join(
-        ctx.trial_dir(request["trial_uuid"]), f"attempt-{request['attempt']}"
-    )
-    return os.path.join(attempt_dir, f"{stream}.txt")
-
-
-def _run_script(ctx, request: dict, script: str, scratch: str):
-    """Run ``script`` with ``scratch`` as its working directory."""
-    trial_uuid, attempt = request["trial_uuid"], request["attempt"]
-    env = request["request"]["env"]
-    trial_dir = ctx.trial_dir(trial_uuid)
+def _run_script(script, cwd, env, attempt_dir, collector) -> int:
+    """Run ``script``, logging and scanning its output; return its exit
+    code."""
     proc = subprocess.Popen(
         ["bash", script],
-        cwd=scratch,
-        env={
-            **os.environ,
-            **env,
-            "SCREENDOOR_TRIAL_DIR": trial_dir,
-            "SCREENDOOR_WORKDIR": ctx.workdir,
-            "SCREENDOOR_ATTEMPT": str(attempt),
-        },
+        cwd=cwd,
+        env=env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    collector = _TagCollector(ctx, trial_uuid, attempt)
     threads = [
-        threading.Thread(target=_pump, args=(stream, path, collector))
-        for stream, path in (
-            (proc.stdout, _attempt_path(ctx, request, "stdout")),
-            (proc.stderr, _attempt_path(ctx, request, "stderr")),
+        threading.Thread(
+            target=_pump,
+            args=(stream, os.path.join(attempt_dir, f"{name}.txt"), collector),
+            daemon=True,
         )
+        for name, stream in (("stdout", proc.stdout), ("stderr", proc.stderr))
     ]
     for thread in threads:
         thread.start()
-    for thread in threads:
-        thread.join()
-    return proc.wait(), collector
+    code = proc.wait()
+    for thread in threads:  # a child left holding a pipe can't stall us
+        thread.join(timeout=PIPE_GRACE_S)
+    return code

@@ -159,7 +159,7 @@ def test_trials_recorded_in_their_task_id_slots(tmp_path):
     r = simulate_dispatch(
         "scd.assaylib.testing.exercise",
         {"n": 5, "cmd": 'echo "!!!screendoor:payload $((i * i))"'},
-        workdir=str(tmp_path),
+        dispatchdir=str(tmp_path),
         **SLOTTED,
     )
     assert r["completed"]["outcome"] == "succeeded"
@@ -185,7 +185,7 @@ def test_oversized_trial_record_falls_back_to_appending(tmp_path, caplog):
         "scd.assaylib.testing.exercise",
         {"n": 1},
         fake_trial=lambda t: big,
-        workdir=str(tmp_path),
+        dispatchdir=str(tmp_path),
         **SLOTTED,
     )
     assert r["trials"][0]["result"] == big
@@ -194,7 +194,7 @@ def test_oversized_trial_record_falls_back_to_appending(tmp_path, caplog):
 
 def test_jsonl_records_take_no_slots(tmp_path):
     r = simulate_dispatch(
-        "scd.assaylib.testing.exercise", {"n": 2}, workdir=str(tmp_path)
+        "scd.assaylib.testing.exercise", {"n": 2}, dispatchdir=str(tmp_path)
     )
     assert [t["task_id"] for t in r["trials"]] == [0, 1]
     assert not list(tmp_path.rglob("*.slots.jsonl"))
@@ -206,7 +206,7 @@ def test_slot_size_set_once_in_prep_payload(tmp_path, caplog):
         "scd.assaylib.testing.exercise",
         {"n": 2},
         fake_trial=lambda t: big,
-        workdir=str(tmp_path),
+        dispatchdir=str(tmp_path),
         **{**SLOTTED, "how_prep_trial_payloads": SLOTTED_8K},
     )
     assert [t["result"] for t in r["trials"]] == [big, big]
@@ -225,7 +225,7 @@ def test_mismatched_slot_size_raises(tmp_path):
         "scd.assaylib.testing.exercise",
         {"n": 1},
         fake_trial=lambda t: 1,
-        workdir=str(tmp_path),
+        dispatchdir=str(tmp_path),
         **{**SLOTTED, "how_prep_trial_payloads": SLOTTED_8K},
     )
     (ctx,) = load_dispatches(str(tmp_path))
@@ -233,3 +233,30 @@ def test_mismatched_slot_size_raises(tmp_path):
         sj.read_trial_payloads(slot_bytes=4096)(ctx)
     (payload,) = sj.read_trial_payloads(slot_bytes=8192)(ctx)
     assert payload["trial_uuid"] == r["trials"][0]["trial_uuid"]
+
+
+def test_failed_never_replaces_completed(tmp_path):
+    r = simulate_dispatch(
+        "scd.assaylib.testing.exercise",
+        {"n": 1},
+        fake_trial=lambda t: True,
+        dispatchdir=str(tmp_path),
+        **SLOTTED,
+    )
+    (ctx,) = load_dispatches(str(tmp_path))
+    (t,) = r["trials"]
+    late = {"event": "failed", "trial_uuid": t["trial_uuid"], "attempt": 0}
+    sj.write_trial_payloads()(ctx, {**late, "task_id": t["task_id"]})
+    (payload,) = sj.read_trial_payloads()(ctx)
+    assert payload["event"] == "completed"
+
+
+def test_low_level_calls_take_the_files_slot_size(tmp_path):
+    p = str(tmp_path / "big.slots.jsonl")
+    sj.init(p, 3, slot_bytes=8192)
+    sj.write(p, 1, {"v": 1})
+    assert sj.read(p) == {1: {"v": 1}} and sj.missing(p, 3) == [0, 2]
+    sj.extend(p, 4)
+    assert os.path.getsize(p) == 4 * 8192
+    with pytest.raises(ValueError, match="8192-byte slots"):
+        sj.read(p, slot_bytes=4096)

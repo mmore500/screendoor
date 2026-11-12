@@ -1,7 +1,7 @@
 from ._FakeClock import FakeClock as FakeClock
+from ._hooks import DISPATCHDIR_HOOKS as DISPATCHDIR_HOOKS
 from ._hooks import INLINE_HOOKS as INLINE_HOOKS
-from ._hooks import WORKDIR_HOOKS as WORKDIR_HOOKS
-from ._hooks import write_workdir_hooks as write_workdir_hooks
+from ._hooks import write_dispatchdir_hooks as write_dispatchdir_hooks
 from ._inject_crash_points import InjectedCrash as InjectedCrash
 from ._inject_crash_points import inject_crash_points as inject_crash_points
 from ._register_hook import register_hook as register_hook

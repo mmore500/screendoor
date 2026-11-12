@@ -1,30 +1,23 @@
 import json
+import os
 import secrets
 import uuid
 
 from ..auxlib._DispatchContext import (
+    DEFAULTS,
     HOOK_NAMES,
     NAMES,
     SEED_NAME,
+    DispatchdirHooks,
     MissingHookError,
-    WorkdirHooks,
+    load_dispatches,
     missing_hooks,
+    run_dir_name,
 )
 from ..auxlib._next_cron_firing import parse_cron
+from ..auxlib._now_iso import now_iso
 
-SETTINGS = {
-    *NAMES,
-    SEED_NAME,
-    "assay",
-    "assay_kwargs",
-    "schedule",
-    "trial_batchsize",
-    "trial_batch_timeout",
-    "trial_maxretry",
-    "churn_maxretry",
-    "eval_context",
-    "dispatch_uuid",
-}
+SETTINGS = {*DEFAULTS, SEED_NAME, "assay", "schedule", "dispatch_uuid"}
 
 
 def validate_dispatch(obj: dict) -> None:
@@ -45,6 +38,11 @@ def validate_dispatch(obj: dict) -> None:
     for key in NAMES:
         if not isinstance(obj.get(key, ""), str):
             raise ValueError(f"{key} must be a string")
+    if "dispatch_uuid" in obj:
+        try:
+            uuid.UUID(obj["dispatch_uuid"])
+        except (TypeError, ValueError, AttributeError):
+            raise ValueError("dispatch_uuid must be a UUID string") from None
     seed = obj.get(SEED_NAME, 0)
     if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
         raise ValueError(f"{SEED_NAME} must be a non-negative integer")
@@ -56,25 +54,36 @@ def validate_dispatch(obj: dict) -> None:
         ("churn_maxretry", 0),
     ):
         value = obj.get(key, least)
-        if not isinstance(value, int) or value < least:
+        if type(value) is not int or value < least:  # no bools
             raise ValueError(f"{key} must be an integer of at least {least}")
 
 
-def submit_dispatch(obj: dict, workdir: str) -> str:
+def submit_dispatch(obj: dict, dispatchdir: str) -> str:
     """Record a new dispatch; return its dispatch_uuid.
 
     Fills in ``dispatch_uuid``, ``meta_seed`` (32 random bits from the
-    operating system) and, as ``"default"``, any absent ``meta_*`` label.
+    operating system) and any absent ``meta_*`` label (``"0"`` for
+    ``meta_redo``, ``"default"`` for the rest). Refuses a dispatch whose
+    run directory an open dispatch already uses.
     """
     obj = json.loads(json.dumps(obj))  # a deep copy that must be JSON
     validate_dispatch(obj)
     obj.setdefault("dispatch_uuid", str(uuid.uuid4()))
     for key in NAMES:
-        obj.setdefault(key, "default")
+        obj.setdefault(key, DEFAULTS[key])
     obj.setdefault(SEED_NAME, secrets.randbits(32))
-    wdhooks = WorkdirHooks(workdir)
-    wdhooks.write_dispatch_submissions(
-        wdhooks.workdir,
+    ddhooks = DispatchdirHooks(dispatchdir)
+    run_dir = os.path.join(ddhooks.dispatchdir, run_dir_name(obj, now_iso()))
+    for ctx in load_dispatches(dispatchdir):
+        if ctx.dispatch_uuid == obj["dispatch_uuid"]:
+            raise ValueError(f"dispatch {ctx.dispatch_uuid} already exists")
+        if ctx.active and ctx.run_dir == run_dir:
+            raise ValueError(
+                f"open dispatch {ctx.dispatch_uuid} uses {run_dir}; "
+                "change meta_redo"
+            )
+    ddhooks.write_dispatch_submissions(
+        ddhooks,
         {
             "event": "submitted",
             "dispatch_uuid": obj["dispatch_uuid"],

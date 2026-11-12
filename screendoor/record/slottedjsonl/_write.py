@@ -2,14 +2,15 @@ import os
 import time
 
 from ._encode_slot import encode_slot
-from ._slot import DEFAULT_SLOT, SlotError, check_slot, placeholder, pwrite_all
+from ._resolve_slot import resolve_slot
+from ._slot import SlotError, placeholder, pwrite_all
 
 
 def write(
     path: str,
     i: int,
     record: dict,
-    slot_bytes: int = DEFAULT_SLOT,
+    slot_bytes: int | None = None,
     wait: float = 120.0,
     clear_first: bool = False,
 ) -> None:
@@ -20,17 +21,21 @@ def write(
     slot is blanked and synced first, so that a crash while overwriting
     leaves padding, not a mix of two records.
     """
-    check_slot(slot_bytes)
+    slot_bytes = resolve_slot(path, slot_bytes)
     if i < 0:
         raise ValueError("index must be >= 0")
     buf = encode_slot(i, record, slot_bytes)
     deadline = time.monotonic() + wait
     while True:
         # no O_CREAT, no O_APPEND; reopened each time to see extensions
-        fd = os.open(path, os.O_WRONLY)
-        if os.fstat(fd).st_size >= (i + 1) * slot_bytes:
+        try:
+            fd = os.open(path, os.O_WRONLY)
+        except FileNotFoundError:  # not made yet: wait, as for a short file
+            fd = None
+        if fd is not None and os.fstat(fd).st_size >= (i + 1) * slot_bytes:
             break
-        os.close(fd)
+        if fd is not None:
+            os.close(fd)
         if time.monotonic() >= deadline:
             raise SlotError(
                 f"slot {i} does not exist after {wait}s; run extend()"

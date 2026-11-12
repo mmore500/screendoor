@@ -7,7 +7,9 @@ DEFAULT_CMD = (
 
 
 def churn(dispatch, trial_submissions, trial_payloads, memo):
-    """Smoke test: launch n copies of cmd, wait, report what came back."""
+    """Smoke test: launch ``n`` (default 1) copies of ``cmd``, each with
+    ``$i`` and ``env``, and succeed with what they sent; fail if any
+    trial failed."""
     trials = scd_churn.fold_trials(trial_submissions, trial_payloads)
     kw = dispatch["assay_kwargs"]
     n = kw.get("n", 1)
@@ -18,7 +20,7 @@ def churn(dispatch, trial_submissions, trial_payloads, memo):
                     {
                         "key": {"i": i},
                         "cmd": kw.get("cmd", DEFAULT_CMD),
-                        "env": {"i": str(i), **kw.get("env", {})},
+                        "env": {**kw.get("env", {}), "i": str(i)},
                     }
                     for i in range(n)
                 ]

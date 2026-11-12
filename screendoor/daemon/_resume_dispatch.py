@@ -1,20 +1,20 @@
 from ..auxlib._DispatchContext import load_dispatches
+from ._select_dispatches import select_dispatches
 
 
-def resume_dispatch(workdir: str, dispatch_uuids: list | None = None) -> list:
+def resume_dispatch(
+    dispatchdir: str, dispatch_uuids: list | None = None
+) -> list:
     """Let the daemon tick killed dispatches again.
 
-    Acts on every killed dispatch, or on those in ``dispatch_uuids``.
-    Returns the uuids resumed. Start the daemon afterwards if it has exited.
+    Acts on every killed dispatch, or on those whose uuids start with one
+    of ``dispatch_uuids``. Returns the uuids resumed. Start the daemon
+    afterwards if it has exited.
     """
     done = []
-    for ctx in load_dispatches(workdir):
-        wanted = not dispatch_uuids or ctx.dispatch_uuid in dispatch_uuids
-        if ctx.killed and not ctx.completed and wanted:
-            ctx.write_dispatch_telemetry(
-                {
-                    "event": "resumed",
-                },
-            )
+    ctxs = load_dispatches(dispatchdir)
+    for ctx in select_dispatches(ctxs, dispatch_uuids):
+        if ctx.killed and not ctx.completed:
+            ctx.write_dispatch_telemetry({"event": "resumed"})
             done.append(ctx.dispatch_uuid)
     return done

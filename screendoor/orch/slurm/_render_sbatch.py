@@ -51,7 +51,7 @@ def render_sbatch(
         *cases,
         '  *) echo "unknown array task" >&2; exit 1 ;;',
         "esac",
-        f"exec {worker} --workdir {shlex.quote(ctx.workdir)} "
+        f"exec {worker} --dispatchdir {shlex.quote(ctx.dispatchdir)} "
         f"--dispatch {ctx.dispatch_uuid} $TRIALS",
     ]
     return "\n".join(lines) + "\n"

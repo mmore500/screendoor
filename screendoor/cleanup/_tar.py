@@ -17,7 +17,12 @@ def tar(ctx, *args, **kwargs) -> str | None:
         return None
     out = os.path.join(ctx.run_dir, ARCHIVE)
     tmp = f"{out}.tmp-{os.getpid()}"
-    with tarfile.open(tmp, "w:gz") as archive:
-        archive.add(trials, arcname="trials")
-    os.replace(tmp, out)
+    try:
+        with tarfile.open(tmp, "w:gz") as archive:
+            archive.add(trials, arcname="trials")
+        os.replace(tmp, out)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
     return out

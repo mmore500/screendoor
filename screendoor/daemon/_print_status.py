@@ -1,6 +1,6 @@
 from ..auxlib._DispatchContext import NAMES, SEED_NAME, load_dispatches
 from ..auxlib._tally_trials import tally_trials
-from ._run_tick_once import next_firing
+from ._next_firing import next_firing
 
 
 def _state(ctx) -> str:
@@ -9,15 +9,13 @@ def _state(ctx) -> str:
     return "killed" if ctx.killed else "open"
 
 
-def print_status(workdir: str, *, file=None, max_failures: int = 3) -> list:
-    """Print each dispatch's state; return the same as a list of dicts.
-
-    Shows the trial counts and tally, when the dispatch last ticked and is
-    next due, whether it is throttled or churn is raising, and how the
-    first ``max_failures`` failed trials ended.
-    """
+def dispatch_status(dispatchdir: str, *, max_failures: int = 3) -> list:
+    """One dict per dispatch: its labels and state, trial counts and
+    tally, when it last ticked and is next due, whether it is throttled or
+    churn is raising, and how the first ``max_failures`` failed trials
+    ended."""
     rows = []
-    for ctx in load_dispatches(workdir):
+    for ctx in load_dispatches(dispatchdir):
         trials = ctx.read_trials() if ctx.is_setup else []
         statuses = sorted({t["status"] for t in trials})
         failed = [t for t in trials if t["status"] == "failed"]
@@ -29,6 +27,7 @@ def print_status(workdir: str, *, file=None, max_failures: int = 3) -> list:
                 s: sum(t["status"] == s for t in trials) for s in statuses
             },
             "tally": tally_trials(trials),
+            "failed": len(failed),
             "failures": [
                 {"trial_uuid": t["trial_uuid"], "key": t["key"], **t["error"]}
                 for t in failed[:max_failures]
@@ -47,42 +46,56 @@ def print_status(workdir: str, *, file=None, max_failures: int = 3) -> list:
                 if k in ctx.completed
             }
         rows.append(row)
+    return rows
 
-        counts = ", ".join(f"{k}={v}" for k, v in row["trials"].items())
-        extras = ("no_result", "retries", "kills", "warnings", "malformed")
-        tally = ", ".join(f"{k} {row['tally'][k]}" for k in extras)
-        lines = [
-            f"{ctx.dispatch_uuid[:8]} {row['state']:9} {row['assay']}",
-            "    meta: "
-            + ", ".join(
-                f"{name.removeprefix('meta_')}={ctx.record[name]}"
-                for name in (*NAMES, SEED_NAME)
-            ),
-            f"    trials: {counts or 'none'} ({tally})",
-        ]
-        for f in row["failures"]:
-            tail = (f["stderr_tail"] or "").strip().splitlines()[-1:]
-            lines.append(
-                f"    failed {f['trial_uuid'][:8]} key={f['key']}: "
-                f"{f['kind']}, exit {f['exit_code']}: {' '.join(tail)}"[:200]
-            )
-        if len(failed) > max_failures:
-            lines.append(f"    ... and {len(failed) - max_failures} more")
-        if ctx.active:
-            note = ", throttled" if ctx.throttled else ""
-            lines.append(
-                f"    last tick: {row['last_tick'] or 'never'}{note}; "
-                f"next: {row['next_tick']}"
-            )
-        elif ctx.killed and not ctx.completed:
-            lines.append("    killed: resume with resume_dispatch")
-        if ctx.churn_error_streak:
-            lines.append(
-                f"    churn raised {ctx.churn_error_streak} ticks in a row: "
-                f"{ctx.churn_error}"[:200]
-            )
-        if ctx.completed:
-            lines.append(f"    completed: {row['completed']}"[:500])
-        lines.append(f"    run_dir: {ctx.run_dir}")
-        print(*lines, sep="\n", file=file)
+
+def _lines(row: dict) -> list:
+    counts = ", ".join(f"{k}={v}" for k, v in row["trials"].items())
+    extras = ("no_result", "retries", "kills", "warnings", "malformed")
+    tally = ", ".join(f"{k} {row['tally'][k]}" for k in extras)
+    meta = ", ".join(
+        f"{name.removeprefix('meta_')}={row[name]}"
+        for name in (*NAMES, SEED_NAME)
+    )
+    lines = [
+        f"{row['dispatch_uuid'][:8]} {row['state']:9} {row['assay']}",
+        f"    meta: {meta}",
+        f"    trials: {counts or 'none'} ({tally})",
+    ]
+    for f in row["failures"]:
+        tail = (f["stderr_tail"] or "").strip().splitlines()[-1:]
+        lines.append(
+            f"    failed {f['trial_uuid'][:8]} key={f['key']}: "
+            f"{f['kind']}, exit {f['exit_code']}: {' '.join(tail)}"[:200]
+        )
+    if row["failed"] > len(row["failures"]):
+        lines.append(
+            f"    ... and {row['failed'] - len(row['failures'])} more"
+        )
+    if row["state"] == "open":
+        note = ", throttled" if row["throttled"] else ""
+        lines.append(
+            f"    last tick: {row['last_tick'] or 'never'}{note}; "
+            f"next: {row['next_tick']}"
+        )
+    elif row["state"] == "killed":
+        lines.append("    killed: resume with resume_dispatch")
+    if row["churn_error_streak"]:
+        lines.append(
+            f"    churn raised {row['churn_error_streak']} ticks in a row: "
+            f"{row['churn_error']}"[:200]
+        )
+    if "completed" in row:
+        lines.append(f"    completed: {row['completed']}"[:500])
+    lines.append(f"    run_dir: {row['run_dir']}")
+    return lines
+
+
+def print_status(
+    dispatchdir: str, *, file=None, max_failures: int = 3
+) -> list:
+    """Print dispatch_status as text; return its rows."""
+    rows = dispatch_status(dispatchdir, max_failures=max_failures)
+    for row in rows:
+        print(*_lines(row), sep="\n", file=file)
     return rows

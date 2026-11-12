@@ -15,7 +15,7 @@ from ._requeue_successor import (
 
 
 def submit_daemon(
-    workdir: str,
+    dispatchdir: str,
     *,
     python: str | None = None,
     sbatch_flags: str = "",
@@ -23,7 +23,7 @@ def submit_daemon(
     log_dir: str = "~/slurmlogs",
     successor: bool = False,
 ) -> str | None:
-    """Queue a daemon job for ``workdir``; return its job id.
+    """Queue a daemon job for ``dispatchdir``; return its job id.
 
     Run this after submitting or resuming a dispatch: neither starts a
     daemon.
@@ -32,29 +32,31 @@ def submit_daemon(
     is due. A ``successor``, queued by a daemon job before it ticks, begins
     when a dispatch is next due after that tick. Daemon jobs do not wait
     on each other; one that starts while another is ticking finds the
-    workdir lock held, skips its tick, and still queues its successor.
+    dispatchdir lock held, skips its tick, and still queues its successor.
 
     Returns None, queueing nothing, when no dispatch is active or (unless
     ``successor``) a daemon job is already queued; that job is pulled
     forward instead.
     """
-    begin = earliest_begin(workdir, successor=successor)
+    begin = earliest_begin(dispatchdir, successor=successor)
     if begin is None:
         logging.info("screendoor: no active dispatch; daemon chain ends")
         if successor:
             message = "daemon chain ended: no active dispatches"
-            notify_daemon(workdir, "termination", message)
+            notify_daemon(dispatchdir, "termination", message)
         return None
-    if not successor and pull_successor_forward(workdir, begin):
+    if not successor and pull_successor_forward(dispatchdir, begin):
         return None
     script = render_daemon_sbatch(
-        workdir,
+        dispatchdir,
         python=python or default_python_command(),
         sbatch_flags=sbatch_flags,
         script_dir=script_dir,
         log_dir=log_dir,
     )
-    path = os.path.join(os.path.abspath(workdir), "screendoor-daemon.sbatch")
+    path = os.path.join(
+        os.path.abspath(dispatchdir), "screendoor-daemon.sbatch"
+    )
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(script)
     out = _rsc.run(
@@ -69,11 +71,11 @@ def submit_daemon(
     return out.strip().split(";")[0]
 
 
-def cancel_chain(workdir: str) -> None:
+def cancel_chain(dispatchdir: str) -> None:
     """Cancel the queued daemon job if no dispatch is left active.
 
     A daemon job that is running finishes its tick, which does nothing.
     """
-    jobs = [jobid for jobid, _ in queued_chain_jobs(workdir)]
-    if jobs and earliest_begin(workdir) is None:
+    jobs = [jobid for jobid, _ in queued_chain_jobs(dispatchdir)]
+    if jobs and earliest_begin(dispatchdir) is None:
         _rsc.run(["scancel", *jobs])

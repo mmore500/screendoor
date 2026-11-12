@@ -31,9 +31,9 @@ def seed_global_rngs(assay):
 
     ``random.seed`` and, if numpy is installed, ``numpy.random.seed`` get
     churn_seed(meta_seed, len(memo), len(trial_submissions)). The same
-    dispatch state so always
-    gives the same draws, which is what lets replay_dispatch reproduce a
-    churn call. ``assay`` is a churn function or a module with one.
+    dispatch state always gives the same draws, so replay_dispatch can
+    reproduce a churn call. ``assay`` is a churn function or a module
+    with one.
 
     In a dispatch, wrap the assay expression in a call::
 
@@ -43,8 +43,9 @@ def seed_global_rngs(assay):
 
     @functools.wraps(churn)
     def seeded_churn(dispatch, trial_submissions, trial_payloads, memo):
-        n_submissions = len(trial_submissions)
-        seed = churn_seed(dispatch["meta_seed"], len(memo), n_submissions)
+        seed = churn_seed(
+            dispatch["meta_seed"], len(memo), len(trial_submissions)
+        )
         random.seed(seed)
         numpy = _numpy()
         if numpy is not None:

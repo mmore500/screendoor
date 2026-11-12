@@ -1,4 +1,4 @@
-"""Submit a dispatch (JSON file, or - for stdin) to a workdir.
+"""Submit a dispatch (JSON file, or - for stdin) to a dispatchdir.
 
 This only records the dispatch. Start a daemon separately to run it.
 """
@@ -11,6 +11,7 @@ from ..auxlib._format_cli_description import format_cli_description
 
 
 def main(argv=None) -> int:
+    from ..auxlib._DispatchContext import DispatchdirConfigError
     from ._submit_dispatch import submit_dispatch
 
     parser = argparse.ArgumentParser(
@@ -18,12 +19,15 @@ def main(argv=None) -> int:
         description=format_cli_description(__doc__),
     )
     parser.add_argument("dispatch", help="path to a JSON dispatch, or -")
-    parser.add_argument("--workdir", default=".")
+    parser.add_argument("--dispatchdir", default=".")
     args = parser.parse_args(argv)
     with sys.stdin if args.dispatch == "-" else open(args.dispatch) as fh:
         text = fh.read()
     try:
-        uid = submit_dispatch(json.loads(text), args.workdir)
+        uid = submit_dispatch(json.loads(text), args.dispatchdir)
+    except DispatchdirConfigError as e:
+        print(f"screendoor: dispatchdir not set up: {e}", file=sys.stderr)
+        return 2
     except ValueError as e:
         print(f"screendoor: invalid dispatch: {e}", file=sys.stderr)
         return 2
