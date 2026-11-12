@@ -12,8 +12,8 @@ def _state(ctx) -> str:
 def dispatch_status(dispatchdir: str, *, max_failures: int = 3) -> list:
     """One dict per dispatch: its labels and state, trial counts and
     tally, when it last ticked and is next due, whether it is throttled or
-    churn is raising, and how the first ``max_failures`` failed trials
-    ended."""
+    churn is raising, and the exit codes of the first ``max_failures``
+    failed trials (None: lost)."""
     rows = []
     for ctx in load_dispatches(dispatchdir):
         trials = ctx.read_trials() if ctx.is_setup else []
@@ -29,7 +29,7 @@ def dispatch_status(dispatchdir: str, *, max_failures: int = 3) -> list:
             "tally": tally_trials(trials),
             "failed": len(failed),
             "failures": [
-                {"trial_uuid": t["trial_uuid"], "key": t["key"], **t["error"]}
+                {k: t[k] for k in ("trial_uuid", "key", "exit_code")}
                 for t in failed[:max_failures]
             ],
             "run_dir": ctx.run_dir,
@@ -51,7 +51,7 @@ def dispatch_status(dispatchdir: str, *, max_failures: int = 3) -> list:
 
 def _lines(row: dict) -> list:
     counts = ", ".join(f"{k}={v}" for k, v in row["trials"].items())
-    extras = ("no_result", "retries", "kills", "warnings", "malformed")
+    extras = ("retries", "kills", "warnings")
     tally = ", ".join(f"{k} {row['tally'][k]}" for k in extras)
     meta = ", ".join(
         f"{name.removeprefix('meta_')}={row[name]}"
@@ -63,10 +63,9 @@ def _lines(row: dict) -> list:
         f"    trials: {counts or 'none'} ({tally})",
     ]
     for f in row["failures"]:
-        tail = (f["stderr_tail"] or "").strip().splitlines()[-1:]
+        how = "lost" if f["exit_code"] is None else f"exit {f['exit_code']}"
         lines.append(
-            f"    failed {f['trial_uuid'][:8]} key={f['key']}: "
-            f"{f['kind']}, exit {f['exit_code']}: {' '.join(tail)}"[:200]
+            f"    failed {f['trial_uuid'][:8]} key={f['key']}: {how}"[:200]
         )
     if row["failed"] > len(row["failures"]):
         lines.append(

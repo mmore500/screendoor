@@ -14,8 +14,8 @@ from screendoor.auxlib._read_jsonl_tolerant import (
 
 def test_append_and_read(tmp_path):
     p = str(tmp_path / "x.jsonl")
-    append_jsonl_line(p, "a", n=1)
-    append_jsonl_line(p, "b", n=2)
+    append_jsonl_line(p, {"event": "a", "n": 1})
+    append_jsonl_line(p, {"event": "b", "n": 2})
     recs = read_jsonl_tolerant(p)
     assert [r["event"] for r in recs] == ["a", "b"]
     for r in recs:
@@ -25,11 +25,11 @@ def test_append_and_read(tmp_path):
 
 def test_torn_lines_skipped(tmp_path, caplog):
     p = str(tmp_path / "x.jsonl")
-    append_jsonl_line(p, "a", n=1)
+    append_jsonl_line(p, {"event": "a", "n": 1})
     with open(p, "ab") as fh:  # a spliced fragment, then a later good line
         fh.write(b'{"schema": 1, "event": "b", "n"\n')
         fh.write(b"\x00\x00garbage\n")
-    append_jsonl_line(p, "c", n=3)
+    append_jsonl_line(p, {"event": "c", "n": 3})
     assert [r["event"] for r in read_jsonl_tolerant(p)] == ["a", "c"]
     assert "torn" in caplog.text
 
@@ -56,5 +56,7 @@ def test_single_write_per_line(tmp_path, monkeypatch):
     monkeypatch.setattr(
         os, "write", lambda fd, b: calls.append(b) or real(fd, b)
     )
-    append_jsonl_line(str(tmp_path / "x.jsonl"), "a", payload="x" * 10000)
+    append_jsonl_line(
+        str(tmp_path / "x.jsonl"), {"event": "a", "payload": "x" * 10000}
+    )
     assert len(calls) == 1 and calls[0].endswith(b"\n")

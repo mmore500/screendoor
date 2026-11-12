@@ -1,5 +1,7 @@
 import random
 
+import pytest
+
 from screendoor.assaylib.potentiation.naive_scan import churn as scan_churn
 from screendoor.assaylib.testing.exercise import churn as ex_churn
 from screendoor.testing import simulate_dispatch
@@ -20,7 +22,7 @@ def trial(key, status="succeeded", result=None):
     if status == "succeeded":
         pay = {**base, "event": "completed", "result": result, "channels": {}}
     else:
-        pay = {**base, "event": "failed", "kind": "error", "channels": {}}
+        pay = {**base, "event": "failed", "exit_code": 1, "channels": {}}
     return [sub], [pay]
 
 
@@ -90,13 +92,11 @@ def test_naive_scan_without_success():
     assert len(summary["scanned"]) == 3
 
 
-def test_naive_scan_failures():
-    trials = [scan(10, 0, result=False), scan(10, 1, "failed")]
-    assert kinds(scan_churn(SCAN, *records(*trials), [])) == ["fail"]
-    tolerant = {"assay_kwargs": {**SCAN["assay_kwargs"], "max_failed": 1}}
-    trials[1] = scan(10, 1)  # succeeded, but sent no result
-    launch, _ = scan_churn(tolerant, *records(*trials), [])
-    assert launch["action"] == "launch"  # counted as no success; next one
+def test_naive_scan_raises_on_no_result():
+    for missing in (scan(10, 1, "failed"), scan(10, 1)):  # failed; no payload
+        trials = [scan(10, 0, result=False), missing]
+        with pytest.raises(RuntimeError, match="has no result"):
+            scan_churn(SCAN, *records(*trials), [])
 
 
 def test_naive_scan_simulated():
@@ -139,10 +139,11 @@ def test_exercise_runs_real_scripts():
     assert [o["result"] for o in outcomes] == [0, 1, 4]
 
 
-def test_exercise_pure_failure():
+def test_exercise_raises_on_failure():
     d = {"assay_kwargs": {"n": 2}}
-    trials = [trial({"i": 0}), trial({"i": 1}, "failed")]
-    assert kinds(ex_churn(d, *records(*trials), [])) == ["fail"]
+    trials = [trial({"i": 0}, result=1), trial({"i": 1}, "failed")]
+    with pytest.raises(RuntimeError, match="failed, key {'i': 1}"):
+        ex_churn(d, *records(*trials), [])
 
 
 def test_jenga_takes_bare_true():

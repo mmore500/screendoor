@@ -29,8 +29,8 @@ def write_trial_payloads(
 
     A later payload replaces an earlier one, except that a ``failed``
     never replaces a ``completed`` (as when folding appended payloads). A
-    payload with no ``task_id`` (the daemon's ``failed: lost``) or too
-    large for its slot is appended to trial_payloads.jsonl instead.
+    payload too large for its slot is appended to trial_payloads.jsonl
+    instead.
     ``slot_bytes``: as for resolve_slot. ``timeout``: seconds to wait for
     the slot to exist.
     """

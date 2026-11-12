@@ -6,9 +6,7 @@ import re
 import pytest
 
 from screendoor.auxlib._DispatchContext import load_dispatches
-from screendoor.auxlib._default_python_command import (
-    default_python_command,
-)
+from screendoor.auxlib._default_python_command import default_python_command
 from screendoor.auxlib._now_iso import now
 from screendoor.daemon import (
     kill_dispatch,
@@ -201,16 +199,10 @@ def test_kill_cancels_jobs_and_resume_relaunches(dispatchdir, clock, slurm):
     }
 
 
-def test_positional_hook_call_fails_at_setup(dispatchdir, clock, slurm):
-    _submit(dispatchdir, how_throttle_churn="scd.orch.slurm.throttle(5)")
-    run_tick_once(dispatchdir)
-    (ctx,) = load_dispatches(dispatchdir)
-    (setup,) = [
-        e
-        for e in ctx.ddhooks.read_dispatch_telemetry(ctx.ddhooks)
-        if e["event"] == "setup"
-    ]
-    assert "error" in setup["hooks"]["how_throttle_churn"]
+def test_positional_hook_call_fails_at_submit(dispatchdir, clock, slurm):
+    with pytest.raises(ValueError, match="how_throttle_churn"):
+        _submit(dispatchdir, how_throttle_churn="scd.orch.slurm.throttle(5)")
+    assert load_dispatches(dispatchdir) == []
 
 
 def test_daemon_chain(dispatchdir, clock, slurm):

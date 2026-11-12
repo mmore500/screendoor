@@ -1,6 +1,5 @@
 import logging
 import os
-import traceback
 
 from ...trial._run_trial import latest_request, run_trial
 
@@ -10,26 +9,19 @@ def _run_fake(ctx, trial_uuid: str, fake_trial) -> None:
     base = {
         "trial_uuid": trial_uuid,
         "attempt": request["attempt"],
-        "task_id": request.get("task_id"),
+        "task_id": request["task_id"],
+        "channels": {},
     }
     ctx.write_trial_telemetry({"event": "started", **base, "pid": os.getpid()})
     trial = {**base, "key": request["key"], **request["request"]}
     try:
         result = fake_trial(trial)
     except Exception:
-        ctx.write_trial_payload(
-            {
-                "event": "failed",
-                **base,
-                "kind": "error",
-                "exit_code": 1,
-                "channels": {},
-                "stderr_tail": traceback.format_exc()[-4000:],
-            },
-        )
+        logging.exception("screendoor: fake trial %s raised", trial_uuid)
+        ctx.write_trial_payload({"event": "failed", **base, "exit_code": 1})
     else:
         ctx.write_trial_payload(
-            {"event": "completed", **base, "result": result, "channels": {}},
+            {"event": "completed", **base, "exit_code": 0, "result": result}
         )
 
 
@@ -38,7 +30,7 @@ def launch(*, fake_trial=None):
 
     Trials run once their submissions are recorded, as they would in a
     job. With ``fake_trial``, call ``fake_trial(trial) -> result`` instead
-    of running the trial's script.
+    of running the trial's script; raising fails the trial.
     """
 
     def launch(ctx, name: str, batches: list) -> None:

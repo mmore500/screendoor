@@ -26,8 +26,7 @@ def notify_daemon(dispatchdir: str, level: str, message: str) -> None:
         if hasattr(hook, "flush"):
             events += hook.flush(hooks, level, history, now()) or []
         for event in events:
-            fields = {"message": message, **event, "level": level}
-            fields.pop("ts", None)
-            append_jsonl_line(path, fields.pop("event", "sent"), **fields)
+            record = {"event": "sent", "message": message, **event}
+            append_jsonl_line(path, {**record, "level": level})
     except Exception:
         logging.exception("screendoor: daemon %s notification failed", level)

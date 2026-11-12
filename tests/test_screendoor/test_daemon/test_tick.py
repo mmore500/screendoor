@@ -46,7 +46,8 @@ def dispatch_events(dispatchdir, event):
 
 def test_submit_fills_uuid_and_seed(dispatchdir, clock):
     uid = submit_dispatch(
-        {"assay": "x", "schedule": "*/5 * * * *", **INLINE_HOOKS}, dispatchdir
+        {"assay": EXERCISE, "schedule": "*/5 * * * *", **INLINE_HOOKS},
+        dispatchdir,
     )
     (ctx,) = load_dispatches(dispatchdir)
     assert ctx.dispatch_uuid == uid
@@ -73,6 +74,13 @@ def test_submit_fills_uuid_and_seed(dispatchdir, clock):
             "schedule": "* * * * *",
             **INLINE_HOOKS,
             "trial_batchsize": 0,
+        },
+        {"assay": "x", "schedule": "* * * * *", **INLINE_HOOKS},  # no x
+        {
+            "assay": EXERCISE,
+            "schedule": "* * * * *",
+            **INLINE_HOOKS,
+            "how_poke": "scd.orch.inline.poke(1)",
         },
     ],
 )
@@ -119,15 +127,16 @@ def test_relaunch_then_lost(dispatchdir, clock):
         EXERCISE,
         assay_kwargs={"n": 1},
         trial_maxretry=2,
+        churn_maxretry=0,  # the lost trial has no result: churn raises
         how_launch=register_hook(launch_nothing),  # poke: every job vanished
     )
     for _ in range(6):
         run_tick_once(dispatchdir, force=True)
     (ctx,) = load_dispatches(dispatchdir)
     (t,) = ctx.read_trials()
-    assert t["status"] == "failed" and t["error"]["kind"] == "lost"
-    assert t["attempt"] == 2
+    assert (t["status"], t["exit_code"], t["attempt"]) == ("failed", None, 2)
     assert ctx.completed["outcome"] == "failed"
+    assert "has no result" in ctx.completed["reason"]
 
 
 def test_kill_pauses_and_resume_relaunches_for_free(dispatchdir, clock):
@@ -325,8 +334,8 @@ def test_status_shows_failures(dispatchdir, clock, capsys):
     )
     (row,) = print_status(dispatchdir)
     (failure,) = row["failures"]
-    assert (failure["kind"], failure["exit_code"]) == ("error", 3)
-    assert "error, exit 3: oops" in capsys.readouterr().out
+    assert failure["exit_code"] == 3
+    assert ": exit 3" in capsys.readouterr().out
 
 
 def test_status_and_setup_records(dispatchdir, clock, capsys):
@@ -339,8 +348,6 @@ def test_status_and_setup_records(dispatchdir, clock, capsys):
     (completed,) = dispatch_events(dispatchdir, "completed")
     assert completed["tally"] == row["tally"]
     (setup,) = dispatch_events(dispatchdir, "setup")
-    launch = setup["hooks"]["how_launch"]
-    assert launch["expr"].startswith("scd.orch.inline")
     assert "python_version" in setup
     assert json.loads(json.dumps(setup)) == setup
 
@@ -361,7 +368,7 @@ def test_dispatchdir_hooks_must_be_supplied(tmp_path):
         DispatchdirConfigError as MissingHookError,
     )
 
-    ok = {"assay": "x", "schedule": "* * * * *", **INLINE_HOOKS}
+    ok = {"assay": EXERCISE, "schedule": "* * * * *", **INLINE_HOOKS}
     with pytest.raises(MissingHookError, match="screendoor.json is missing"):
         submit_dispatch(ok, str(tmp_path))
     path = write_dispatchdir_hooks(str(tmp_path))
@@ -401,7 +408,7 @@ def test_run_dir_layout_and_redo(dispatchdir, clock):
 
 def test_submit_refuses_clashes(dispatchdir):
     base = {
-        "assay": "x",
+        "assay": EXERCISE,
         "schedule": "* * * * *",
         "meta_seed": 1,
         **INLINE_HOOKS,

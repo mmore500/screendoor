@@ -40,11 +40,11 @@ def test_order_independent():
     evs = [
         requested(),
         requested(1),
-        ev("failed", 1, kind="error", exit_code=2, stderr_tail="boom"),
+        ev("failed", 1, exit_code=2),
     ]
     (want,) = fold_trial_events(evs)
     assert (want["status"], want["attempt"]) == ("failed", 1)
-    assert want["error"]["kind"] == "error"
+    assert (want["exit_code"], want["result"]) == (2, None)
     rng = random.Random(1)
     for _ in range(30):
         rng.shuffle(evs)
@@ -71,11 +71,11 @@ def test_killed_attempt_is_not_a_failure():
     evs = [
         requested(),
         ev("killed"),
-        ev("failed", kind="error", exit_code=143, stderr_tail=""),
+        ev("failed", exit_code=143),
     ]
     for perm in itertools.permutations(evs):
         (t,) = fold_trial_events(list(perm))
-        assert (t["status"], t["kills"], t["error"]) == ("killed", 1, None)
+        assert (t["status"], t["kills"], t["exit_code"]) == ("killed", 1, None)
         assert t["state"] == "pending"
     (t,) = fold_trial_events([*evs, requested(1)])
     assert (t["status"], t["attempt"], t["kills"]) == ("requested", 1, 1)

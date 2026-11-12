@@ -7,8 +7,10 @@ def fold_trials(trial_submissions: list, trial_payloads: list) -> list:
     Each dict has ``trial_uuid``, ``task_id``, ``key``, ``request``,
     ``status`` (``requested``, ``killed``, ``succeeded`` or ``failed``),
     ``state`` (``complete`` once succeeded or failed, else ``pending``),
-    ``attempt``, ``job``, ``result``, ``channels``, ``error`` and the
-    ``retries``, ``kills`` and ``malformed`` counts. Record order does not
+    ``attempt``, ``job``, ``result``, ``channels``, ``exit_code`` (None
+    until the trial ends, and for a lost one) and the ``retries`` and
+    ``kills`` counts. ``result`` is what the trial sent if it succeeded,
+    else None; read it with scd.churn.trial_result. Record order does not
     matter: a payload from any attempt settles its trial, ``completed``
     over ``failed``. Trials come in order of first request.
     """

@@ -15,7 +15,7 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--dispatchdir", required=True)
     parser.add_argument("--dispatch", required=True, help="dispatch_uuid")
-    parser.add_argument("trials", nargs="+", help="trial_uuid or trial dir")
+    parser.add_argument("trials", nargs="+", help="trial_uuid")
     args = parser.parse_args(argv)
     return worker(args.dispatchdir, args.dispatch, args.trials)
 

@@ -21,9 +21,8 @@ def churn(dispatch, trial_submissions, trial_payloads, memo):
     * ``cmd`` and ``env``: the replay script, which gets ``$timepoint``
       (as JSON unless it is a string), ``$timepoint_index`` and
       ``$replicate``. It succeeds by sending ``true`` or
-      ``{"accept": true, ...}`` as its result.
-    * ``max_failed``: trials that may fail or send no result, in all,
-      before the dispatch fails (default 0); they count as no success.
+      ``{"accept": true, ...}`` as its result; churn raises on a trial
+      with no result.
 
     Succeeds with the first potentiated ``timepoint`` and its ``index``,
     or None for both if no replay from any timepoint succeeded, and a
@@ -35,7 +34,7 @@ def churn(dispatch, trial_submissions, trial_payloads, memo):
     replicates = int(kw.get("replicates", 1))
     by_key = {canonical_json(t["key"]): t for t in trials}
 
-    scanned, n_failed = [], 0
+    scanned = []
     for index, timepoint in enumerate(timepoints):
         keys = [
             {"timepoint": timepoint, "replicate": r} for r in range(replicates)
@@ -67,21 +66,12 @@ def churn(dispatch, trial_submissions, trial_payloads, memo):
         if any(t["state"] == "pending" for t in found):
             return [progress]
 
-        ok = [
-            t["result"]
-            for t in found
-            if t["status"] == "succeeded" and t["result"] is not None
-        ]
-        n_failed += len(found) - len(ok)
-        if n_failed > kw.get("max_failed", 0):
-            return [scd_churn.fail(f"{n_failed} replays failed")]
-        successes = sum(map(accepted, ok))
+        successes = sum(accepted(scd_churn.trial_result(t)) for t in found)
         scanned.append(
             {
                 "timepoint": timepoint,
                 "successes": successes,
                 "replicates": replicates,
-                "failed": len(found) - len(ok),
             }
         )
         if successes:

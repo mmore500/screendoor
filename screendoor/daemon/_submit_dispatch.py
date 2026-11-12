@@ -14,6 +14,7 @@ from ..auxlib._DispatchContext import (
     missing_hooks,
     run_dir_name,
 )
+from ..auxlib._eval_hook import eval_hook, make_eval_namespace
 from ..auxlib._next_cron_firing import parse_cron
 from ..auxlib._now_iso import now_iso
 
@@ -56,6 +57,12 @@ def validate_dispatch(obj: dict) -> None:
         value = obj.get(key, least)
         if type(value) is not int or value < least:  # no bools
             raise ValueError(f"{key} must be an integer of at least {least}")
+    namespace = make_eval_namespace(obj.get("eval_context"))
+    for key in ("assay", *HOOK_NAMES):
+        try:
+            eval_hook(obj[key], namespace)
+        except Exception as e:
+            raise ValueError(f"{key} {obj[key]!r} raised {e!r}") from e
 
 
 def submit_dispatch(obj: dict, dispatchdir: str) -> str:

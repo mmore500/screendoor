@@ -28,9 +28,10 @@ def run_after_append_hooks(path: str, record: dict) -> None:
         hook(path, record)
 
 
-def append_jsonl_line(path: str, event: str, **fields) -> dict:
-    """Append one record as one line in a single ``write()``; return it."""
-    record = stamp({"event": event, **fields})
+def append_jsonl_line(path: str, record: dict) -> dict:
+    """Append ``record`` (a dict with "event"), stamped, as one line in a
+    single ``write()``; return it as stamped."""
+    record = stamp(record)
     line = (canonical_json(record) + "\n").encode()
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)

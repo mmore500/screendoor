@@ -10,7 +10,7 @@ def churn(dispatch, trial_submissions, trial_payloads, memo):
     tried per round, default 8), ``cmd`` and ``env``. Each trial gets
     ``$components``, the kept components less the one removed, and passes
     (the removal is harmless) if it sends ``true`` or ``{"accept": true}``;
-    a failed trial or a null result counts as not passing.
+    churn raises on a trial with no result.
     """
     trials = scd_churn.fold_trials(trial_submissions, trial_payloads)
     kw = dispatch["assay_kwargs"]
@@ -53,7 +53,11 @@ def churn(dispatch, trial_submissions, trial_payloads, memo):
     if any(t["state"] == "pending" for t in this_round.values()):
         return [scd_churn.progress(r, r + len(candidates), f"round {r}")]
 
-    passing = [c for c in candidates if accepted(this_round[c]["result"])]
+    passing = [
+        c
+        for c in candidates
+        if accepted(scd_churn.trial_result(this_round[c]))
+    ]
     if passing:
         nxt = {**s, "kept": [k for k in s["kept"] if k != passing[0]]}
     else:

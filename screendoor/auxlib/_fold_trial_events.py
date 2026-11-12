@@ -20,10 +20,9 @@ def _fold_trial(trial_uuid: str, events: list[dict]) -> dict | None:
         "job": latest.get("job"),  # {"name", "index"}: where it runs
         "result": None,
         "channels": {},
-        "error": None,
+        "exit_code": None,
         "kills": len(killed),  # attempts cancelled by kill_dispatch
         "retries": 0,  # relaunches after a job vanished unkilled
-        "malformed": 0,
     }
     done = max(
         (
@@ -37,18 +36,15 @@ def _fold_trial(trial_uuid: str, events: list[dict]) -> dict | None:
         default=None,
     )
     if done is not None:
-        trial["attempt"] = max(attempt, _attempt(done))
-        trial["channels"] = done.get("channels", {})
-        trial["malformed"] = done.get("malformed", 0)
-        if done["event"] == "completed":
-            trial.update(status="succeeded", result=done.get("result"))
-        else:
-            keys = ("kind", "exit_code", "stderr_tail")
-            trial.update(status="failed", error={k: done.get(k) for k in keys})
-    done_statuses = ("succeeded", "failed")
-    trial["state"] = (
-        "complete" if trial["status"] in done_statuses else "pending"
-    )
+        trial.update(
+            status="succeeded" if done["event"] == "completed" else "failed",
+            attempt=max(attempt, _attempt(done)),
+            result=done.get("result"),
+            channels=done.get("channels", {}),
+            exit_code=done.get("exit_code"),
+        )
+    succeeded_or_failed = trial["status"] in ("succeeded", "failed")
+    trial["state"] = "complete" if succeeded_or_failed else "pending"
     relaunched_kills = sum(k < trial["attempt"] for k in killed)
     trial["retries"] = trial["attempt"] - relaunched_kills
     return trial

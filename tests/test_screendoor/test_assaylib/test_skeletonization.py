@@ -103,7 +103,7 @@ def test_rel_tol_and_tasks_and_replicates():
     assert {t["key"]["replicate"] for t in r["trials"]} == {0, 1}
 
 
-def test_trial_failure_fails_dispatch_or_rejects():
+def test_trial_failure_fails_dispatch():
     def fake(t):
         if "7" not in t["env"]["knockout"].replace("-", ",").split(","):
             return {"accept": True}
@@ -113,15 +113,10 @@ def test_trial_failure_fails_dispatch_or_rejects():
         "scd.assaylib.skeletonization.ddmin",
         {"n_sites": 8, "cmd": "x"},
         fake_trial=fake,
+        churn_maxretry=0,
     )
     assert r["completed"]["outcome"] == "failed"
-    assert "simulator crashed" in r["completed"]["reason"]
-    r = simulate_dispatch(
-        "scd.assaylib.skeletonization.ddmin",
-        {"n_sites": 8, "cmd": "x", "on_trial_failure": "reject"},
-        fake_trial=fake,
-    )
-    assert r["completed"]["outcome"] == "succeeded"
+    assert "(failed, key" in r["completed"]["reason"]
 
 
 def test_sequence_env_and_skeleton():
@@ -203,6 +198,7 @@ def test_result_without_score_fails_the_dispatch():
         "scd.assaylib.skeletonization.ddmin",
         {"n_sites": 4, "cmd": "x"},
         fake_trial=lambda t: {"viable": True},
+        churn_maxretry=0,
     )
     assert r["completed"]["outcome"] == "failed"
     assert "lacks ['score']" in r["completed"]["reason"]

@@ -16,9 +16,6 @@ from ._fold_trial_events import fold_trial_events as fold_trial_events
 from ._format_cli_description import (
     format_cli_description as format_cli_description,
 )
-from ._get_screendoor_version import (
-    get_screendoor_version as get_screendoor_version,
-)
 from ._lazy_attach_stub import lazy_attach_stub as lazy_attach_stub
 from ._make_trial_uuid import make_trial_uuid as make_trial_uuid
 from ._next_cron_firing import next_cron_firing as next_cron_firing

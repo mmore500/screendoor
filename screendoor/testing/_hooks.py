@@ -27,10 +27,9 @@ INLINE_HOOKS = {
         for op in ("read", "write")
     },
     "how_prep_trial_payloads": "scd.record.appendjsonl.prep_trial_payloads()",
-    "how_unblock_churn": "scd.unblock.all_trials_ready",
-    "how_cleanup_success": "lambda *args, **kwargs: ("
-    "scd.cleanup.tar(*args, **kwargs), scd.cleanup.clear(*args, **kwargs))",
-    "how_cleanup_failure": "lambda *args, **kwargs: None",
+    "how_unblock_churn": "scd.unblock.all_trials_ready()",
+    "how_cleanup_success": "scd.cleanup.tar(clear=True)",
+    "how_cleanup_failure": "lambda ctx, completed: None",
 }
 assert set(INLINE_HOOKS) == set(HOOK_NAMES)
 

@@ -2,13 +2,17 @@ import os
 import shutil
 
 
-def clear(ctx, *args, **kwargs) -> bool:
-    """Delete the run directory's ``trials/``; return whether it existed.
-
-    Extra arguments (what the cleanup hook was called with) are ignored.
-    """
+def clear_trials(ctx) -> None:
+    """Delete the run directory's ``trials/``, if there is one."""
     trials = os.path.join(ctx.run_dir, "trials")
-    if not os.path.isdir(trials):
-        return False
-    shutil.rmtree(trials)
-    return True
+    if os.path.isdir(trials):
+        shutil.rmtree(trials)
+
+
+def clear():
+    """Delete the run directory's ``trials/``."""
+
+    def clear(ctx, completed: dict) -> None:
+        clear_trials(ctx)
+
+    return clear

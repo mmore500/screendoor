@@ -58,6 +58,7 @@ def test_subprocess_timeout_relaunch_then_lost(dispatchdir):
             **INLINE_HOOKS,
             "trial_batch_timeout": 1,
             "trial_maxretry": 1,
+            "churn_maxretry": 0,
             "how_launch": "scd.orch.subprocess.launch()",
             "how_poke": "scd.orch.subprocess.poke()",
         },
@@ -65,8 +66,7 @@ def test_subprocess_timeout_relaunch_then_lost(dispatchdir):
     )
     ctx = _until_closed(dispatchdir)
     (t,) = ctx.read_trials()
-    assert t["status"] == "failed" and t["error"]["kind"] == "lost"
-    assert t["attempt"] == 1
+    assert (t["status"], t["exit_code"], t["attempt"]) == ("failed", None, 1)
 
 
 def test_running_jobs_survive_a_daemon_crash(dispatchdir, monkeypatch):
@@ -129,5 +129,5 @@ def test_kill_stops_the_trial_processes(dispatchdir):
     assert not os.path.exists(f"/proc/{script_pid}")  # the script itself
     assert not is_alive(pidfile(ctx, t["job"]))
     (t,) = ctx.read_trials()
-    assert (t["status"], t["kills"], t["error"]) == ("killed", 1, None)
+    assert (t["status"], t["kills"], t["result"]) == ("killed", 1, None)
     assert run_tick_once(dispatchdir, force=True) == []

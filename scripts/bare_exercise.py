@@ -49,9 +49,9 @@ dispatch = {
     "how_notify_failure": "scd.notify.log.notify()",
     "how_notify_warning": "scd.notify.log.notify()",
     "how_notify_anomaly": "scd.notify.log.notify()",
-    "how_unblock_churn": "scd.unblock.all_trials_ready",
-    "how_cleanup_success": "lambda *args, **kwargs: (scd.cleanup.tar(*args, **kwargs), scd.cleanup.clear(*args, **kwargs))",
-    "how_cleanup_failure": "lambda *args, **kwargs: None",
+    "how_unblock_churn": "scd.unblock.all_trials_ready()",
+    "how_cleanup_success": "scd.cleanup.tar(clear=True)",
+    "how_cleanup_failure": "lambda ctx, completed: None",
 }
 # the daemon's own hooks
 DISPATCHDIR_HOOKS = {

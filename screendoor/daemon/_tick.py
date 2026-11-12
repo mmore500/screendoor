@@ -2,12 +2,7 @@ import logging
 import traceback
 
 from ..auxlib._fold_trial_events import fold_trial_events
-from ._apply_actions import (
-    apply_actions,
-    check_actions,
-    churn_step,
-    complete,
-)
+from ._apply_actions import apply_actions, check_actions, churn_step, complete
 from ._notify import flush_batched_notifications, notify
 from ._setup_dispatch import setup_dispatch
 from ._submit_trials import submit_trials
@@ -18,7 +13,7 @@ def _job_label(t: dict) -> str:
 
 
 def relaunch(ctx, gone: set) -> None:
-    """Request vanished trials again, or record them ``failed: lost``.
+    """Request vanished trials again, or record them ``failed`` (lost).
 
     A killed attempt does not count against ``trial_maxretry``.
     """
@@ -50,17 +45,19 @@ def relaunch(ctx, gone: set) -> None:
                 }
             )
             continue
+        ctx.log(
+            "screendoor: %s lost: job %s vanished %d times",
+            uid[:8],
+            _job_label(t),
+            t["retries"] + 1,
+        )
         ctx.write_trial_payload(
             {
                 "event": "failed",
                 "trial_uuid": uid,
                 "attempt": t["attempt"],
-                "kind": "lost",
-                "exit_code": None,
-                "channels": {},
-                "stderr_tail": f"job {_job_label(t)} vanished "
-                f"{t['retries'] + 1} times",
-            },
+                "task_id": t["task_id"],
+            }
         )
     submit_trials(ctx, entries, len(trials))
 

@@ -9,10 +9,10 @@ def kill_dispatch(
     """Cancel in-progress trials and pause their dispatches.
 
     Acts on every open dispatch, or on those whose uuids start with one
-    of ``dispatch_uuids``. A
-    killed dispatch is not completed and its trials are not failed: the daemon
-    skips it until resume_dispatch, then relaunches the cancelled trials
-    without counting a retry. Safe to repeat. Returns the uuids acted on.
+    of ``dispatch_uuids``. A killed dispatch is not completed and its
+    trials are not failed: the daemon skips it until resume_dispatch, then
+    relaunches the cancelled trials without counting a retry. Safe to
+    repeat. Returns the uuids acted on.
     """
     done = []
     with dispatchdir_lock(dispatchdir, wait=True):  # not mid-tick
@@ -21,11 +21,7 @@ def kill_dispatch(
             if ctx.completed:
                 continue
             if not ctx.killed:  # pause first, so that no tick relaunches
-                ctx.write_dispatch_telemetry(
-                    {
-                        "event": "killed",
-                    },
-                )
+                ctx.write_dispatch_telemetry({"event": "killed"})
             trials = ctx.read_trials() if ctx.is_setup else []
             trials = [t for t in trials if t["status"] == "requested"]
             if trials:

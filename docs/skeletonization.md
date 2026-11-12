@@ -54,7 +54,6 @@ certificate (checked by `test_matches_2026_11_03_implementation` and
 | `rel_tol`, `abs_tol` | 0, 0 | Accept if `score >= base*(1-rel_tol) - abs_tol` |
 | `require_atleast` | `[]` | Result list fields that must not drop below wildtype (e.g. `tasks`) |
 | `accept_fraction` | 1.0 | For `{"accept": bool}` results: fraction of replicates needed |
-| `on_trial_failure` | `"fail"` | `"fail"` the dispatch, or `"reject"` the genotype |
 | `search_seed` | the dispatch's `meta_seed` | Seed of the search's own RNG |
 | `combination_rounds` | 2 | Rounds of union proposals after accepted masks |
 | `final_audit` | true | Re-test the skeleton afresh before certifying it |
@@ -69,8 +68,10 @@ Trials receive `env`, then `$retained`, `$knockout` (site ranges such as
 `0-5,9`; decode with `scd.auxlib.decode_sites`), `$n_sites`, `$replicate`
 and, with `sequence`, `$sequence`. A result is `true`/`false`, a number (the
 score), an object with `accept`, or an object with `score` and optionally
-`viable` and the `require_atleast` fields. A result of another shape, or
-missing a field, fails the dispatch.
+`viable` and the `require_atleast` fields. A trial with no result (it
+failed, or sent no `payload`), or a result of another shape or missing a
+field, makes churn raise, and so fails the dispatch after
+`churn_maxretry` retries.
 
 The dispatch succeeds whenever the search ends. Check `summary.certified`:
 it is false if the search stopped early (`max_proposal_batches`, an audit

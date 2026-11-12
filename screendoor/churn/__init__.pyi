@@ -9,4 +9,5 @@ from ._progress import progress as progress
 from ._seed_global_rngs import churn_seed as churn_seed
 from ._seed_global_rngs import seed_global_rngs as seed_global_rngs
 from ._succeed import succeed as succeed
+from ._trial_result import trial_result as trial_result
 from ._warning import warning as warning

@@ -4,7 +4,7 @@ import tarfile
 from screendoor.auxlib._DispatchContext import load_dispatches
 from screendoor.testing import simulate_dispatch
 
-KEEP = "lambda *args, **kwargs: None"  # keep trials/ to look at
+KEEP = "lambda ctx, completed: None"  # keep trials/ to look at
 
 
 def run(cmd, **settings):
@@ -46,39 +46,35 @@ def test_tags_and_channels():
     assert [e["event"] for e in payloads] == ["completed"]
 
 
-def test_malformed_lines_go_to_telemetry():
-    t, ctx = run(
+def test_bad_json_is_ignored():
+    t, _ = run(
         "echo '!!!screendoor:telemetry {nope'\n"
-        "echo '!!!screendoor:payload {nope'\n"
         "echo '!!!screendoor:payload 7'\n"
+        "echo '!!!screendoor:payload {nope'\n"
     )
-    assert (t["status"], t["result"], t["malformed"]) == ("succeeded", 7, 2)
-    events = [
-        e
-        for e in ctx.hook("how_read_trial_telemetry")(ctx)
-        if e["event"] != "started"
-    ]
-    assert [e["event"] for e in events] == ["malformed", "malformed"]
-    assert [e["channel"] for e in events] == ["telemetry", "payload"]
+    assert (t["status"], t["result"], t["channels"]) == ("succeeded", 7, {})
 
 
-def test_no_result_is_null():
-    for cmd in ("echo hi", "echo '!!!screendoor:payload {nope'"):
-        t, _ = run(cmd)
-        assert (t["status"], t["result"], t["error"]) == (
-            "succeeded",
+def test_no_payload_is_no_result():
+    t, _ = run("echo hi")
+    assert (t["status"], t["result"], t["exit_code"]) == ("succeeded", None, 0)
+
+
+def test_failure_has_exit_code_and_no_result():
+    for cmd in (
+        "echo oops >&2; exit 3",
+        "echo '!!!screendoor:payload 1'; exit 3",
+    ):
+        t, ctx = run(cmd)
+        assert (t["status"], t["result"], t["exit_code"]) == (
+            "failed",
             None,
-            None,
+            3,
         )
-
-
-def test_error_kinds():
-    t, _ = run("echo oops >&2; exit 3")
-    assert t["status"] == "failed"
-    assert t["error"]["kind"] == "error" and t["error"]["exit_code"] == 3
-    assert "oops" in t["error"]["stderr_tail"]
-    t, _ = run("echo '!!!screendoor:payload 1'; false")
-    assert t["error"]["kind"] == "error"
+    stderr = os.path.join(
+        ctx.trial_dir(t["trial_uuid"]), "attempt-0", "stderr.txt"
+    )
+    assert os.path.exists(stderr)
 
 
 def test_trial_dir_layout():
@@ -128,6 +124,7 @@ def test_failure_keeps_trials_by_default(tmp_path):
         dispatchdir=str(tmp_path),
     )
     assert r["completed"]["outcome"] == "failed"
+    assert "has no result" in r["completed"]["reason"]
     (ctx,) = load_dispatches(r["dispatchdir"])
     assert os.path.isdir(os.path.join(ctx.run_dir, "trials"))
     assert not os.path.exists(os.path.join(ctx.run_dir, "trials.tar.gz"))
