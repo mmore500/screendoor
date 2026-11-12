@@ -5,7 +5,6 @@ authors = [
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: MIT License",
   "Natural Language :: English",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
@@ -17,7 +16,8 @@ classifiers = [
 # standard library only
 dependencies = []
 description = "Dynamic screens (knockouts, ablations, sweeps) driven by append-only JSONL records."
-license = {text = "MIT license"}
+license = "MIT"
+license-files = ["LICENSE"]
 name = "screendoor"
 keywords = ["screendoor", "slurm", "knockout", "screen"]
 requires-python = ">=3.10"
@@ -43,7 +43,7 @@ namespaces = false
 
 [build-system]
 build-backend = "setuptools.build_meta"
-requires = ["setuptools >= 75.0.0"]
+requires = ["setuptools >= 77.0.0"]
 
 [project.optional-dependencies]
 testing = [
@@ -56,7 +56,14 @@ testing = [
   "ruff==0.1.11",
 ]
 docs = ["sybil>=6.1.1"]
-release = ["bumpver==2023.1129", "build>=1.2.2", "twine==6.0.1"]
+release = [
+  "build>=1.2.2",
+  "bumpver==2023.1129",
+  "setuptools>=77.0.0",
+  "twine==6.0.1",
+  "uv>=0.4.18",
+  "wheel>=0.45.0",
+]
 
 [tool.black]
 line-length = 79

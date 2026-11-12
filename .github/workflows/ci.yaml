@@ -2,14 +2,19 @@ name: ci
 
 on:
   push:
-    branches: [master, main]
-    tags: ['*']
+    branches:
+    - master
+    tags:
+      - '*'
   pull_request:
-    branches: ['*']
+    branches:
+    - '*'
+  schedule:
+    - cron: '0 0 * * 1'  # weekly
   workflow_dispatch:
-
 jobs:
   test:
+    name: "test py${{ matrix.python-version }}"
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -17,59 +22,225 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
-    - run: python -m pip install --upgrade pip tox tox-gh-actions
-    - run: tox
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools
+        pip install tox tox-gh-actions
+    - name: Test with tox
+      run: tox
 
-  bare:
-    # screendoor in a bare venv, running testing/exercise end to end
+  cli-smoke:
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
       with:
         python-version: "3.10"
-    - run: |
-        python -m venv /tmp/bare
-        /tmp/bare/bin/pip install .
-        cd /tmp && /tmp/bare/bin/python $GITHUB_WORKSPACE/scripts/bare_exercise.py
-
-  lint:
-    runs-on: ubuntu-24.04
-    steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-    - run: pip install -r requirements-dev/requirements-testing.txt
-    - run: ./lint.sh
+    - name: Install screendoor
+      run: python3 -m pip install .
+    - name: Run commands
+      run: |
+        cd /tmp
+        python3 -m screendoor
+        for cmd in $(python3 -c 'from screendoor.__main__ import COMMANDS; print(*COMMANDS)'); do
+          python3 -m "${cmd}" --help
+        done
 
   pyz:
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
-    - run: ./scripts/build_pyz.sh
-    - run: python3 dist/screendoor-*.pyz worker --help
+    - name: Build single-file pyz
+      run: ./scripts/build_pyz.sh
+    - name: Test pyz
+      run: python3 dist/screendoor-*.pyz worker --help
     - uses: actions/upload-artifact@v4
       with:
         name: screendoor-pyz
         path: dist/*.pyz
 
-  docker:
-    if: startsWith(github.ref, 'refs/tags/')
+  coverage:
     runs-on: ubuntu-24.04
-    permissions:
-      packages: write
     steps:
     - uses: actions/checkout@v4
-    - uses: docker/login-action@v3
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
       with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    - uses: docker/build-push-action@v6
+        python-version: "3.12"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools
+        python -m pip install -r requirements-dev/py312/requirements-testing.txt
+    - name: Log coverage configuration
+      run: coverage debug sys
+    - name: Run tests with coverage report
+      run: coverage run -m pytest
+    - uses: codecov/codecov-action@v4
       with:
-        push: true
-        tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+        token: ${{ secrets.CODECOV_TOKEN }}
+        flags: tests
+        fail_ci_if_error: true
+        verbose: true
+
+  tidy:
+    runs-on: ubuntu-24.04
+    steps:
+    - name: Install apt dependencies
+      run: sudo apt-get install -y rename
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools
+        python -m pip install -r requirements-dev/requirements-testing.txt
+    - uses: editorconfig-checker/action-editorconfig-checker@main
+    - name: Test editorconfig tidyness
+      run: editorconfig-checker
+    - name: Test tidy/ tidyness
+      run: ./tidy/test_tidy.sh
+
+  packaging-bdist:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build bdist
+        run: |
+          python3 -m venv env
+          source env/bin/activate
+          python3 -m pip install -r requirements-dev/requirements-release.txt
+          python3 -m build --wheel
+          tree dist
+          deactivate
+      - name: Upgrade pip
+        run: python3 -m pip install pip --upgrade
+      - name: Install from bdist
+        run: python3 -m pip install dist/*.whl
+      - name: Test install
+        run: |
+          cp scripts/bare_exercise.py /tmp/
+          find . -type f -name '*.py' -exec rm {} \;
+          find . -type f -name '*.pyi' -exec rm {} \;
+          python3 -c "import screendoor; print(screendoor.__version__)"
+          cd /tmp && python3 /tmp/bare_exercise.py
+
+  packaging-sdist:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build sdist
+        run: |
+          python3 -m venv env
+          source env/bin/activate
+          python3 -m pip install -r requirements-dev/requirements-release.txt
+          python3 -m build --sdist
+          tree dist
+          deactivate
+      - name: Upgrade pip
+        run: python3 -m pip install pip --upgrade
+      - name: Install from sdist
+        run: python3 -m pip install dist/*.tar.gz
+      - name: Test install
+        run: |
+          cp scripts/bare_exercise.py /tmp/
+          find . -type f -name '*.py' -exec rm {} \;
+          find . -type f -name '*.pyi' -exec rm {} \;
+          python3 -c "import screendoor; print(screendoor.__version__)"
+          cd /tmp && python3 /tmp/bare_exercise.py
+
+  packaging-source:
+    # screendoor in a bare environment, running testing/exercise end to end
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Upgrade pip
+        run: python3 -m pip install pip --upgrade
+      - name: Install from source
+        run: python3 -m pip install .
+      - name: Test install
+        run: |
+          cp scripts/bare_exercise.py /tmp/
+          rm -rf *
+          cd /tmp
+          python3 -c "import screendoor; print(screendoor.__version__)"
+          python3 /tmp/bare_exercise.py
+
+  deploy-ghcr:
+    name: Docker Image Deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Set Tags
+        id: set_tags
+        run: |
+          if [[ "${GITHUB_REF_NAME}" != *merge ]]; then
+            echo "TAGS=ghcr.io/mmore500/screendoor:latest,ghcr.io/mmore500/screendoor:${GITHUB_REF_NAME}" >> $GITHUB_ENV
+          else
+            echo "TAGS=ghcr.io/mmore500/screendoor:latest" >> $GITHUB_ENV
+          fi
+      - name: Build and Push to GitHub Container Registry
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ env.TAGS }}
+
+  build_dist:
+    name: Build source and wheel distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build sdist and wheel
+        run: pipx run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  deploy:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - build_dist
+      - cli-smoke
+      - coverage
+      - packaging-bdist
+      - packaging-sdist
+      - packaging-source
+      - pyz
+      - test
+      - tidy
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: dist
+        path: dist
+    - name: Publish package
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_API_TOKEN }}
+        verbose: true

@@ -1,0 +1,13 @@
+include AUTHORS.rst
+include CITATION.cff
+include CONTRIBUTING.rst
+include HISTORY.rst
+include LICENSE
+include README.md
+
+recursive-include tests *
+recursive-include screendoor *.pyi
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+
+recursive-include docs *.md
