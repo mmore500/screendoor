@@ -131,9 +131,9 @@ python3 -m pip install ./screendoor
 On a cluster, the daemon can run from the container image:
 
 ```bash
-apptainer exec docker://ghcr.io/mmore500/screendoor:v0.1.1 \
+apptainer exec docker://ghcr.io/mmore500/screendoor:v0.1.2 \
   python3 -m screendoor.daemon.run_tick_once --dispatchdir .
-eval "$(apptainer exec docker://ghcr.io/mmore500/screendoor:v0.1.1 \
+eval "$(apptainer exec docker://ghcr.io/mmore500/screendoor:v0.1.2 \
   cat /opt/screendoor/slurm-binds.sh | sh)"
 ```
 
