@@ -51,6 +51,7 @@ def make_dispatch(
     orchestrator: str = "subprocess",
     max_procs: int = 8,
     trial_batchsize: int = 1,
+    assay_kwargs: dict | None = None,
 ) -> dict:
     with open(os.path.join(HERE, "organisms.json")) as fh:
         organisms = json.load(fh)
@@ -80,6 +81,7 @@ def make_dispatch(
     }
     if search_seed is not None:
         kwargs["search_seed"] = search_seed
+    kwargs.update(assay_kwargs or {})  # e.g. gama's population sizes
     d = {
         "meta_project": "default",
         "meta_experiment": "default",
@@ -140,7 +142,14 @@ def main() -> int:
     p.add_argument(
         "--policy",
         default="hybrid",
-        choices=["ddmin", "minesweeper", "hybrid"],
+        choices=["ddmin", "minesweeper", "hybrid", "gama"],
+    )
+    p.add_argument(
+        "--assay-kwargs",
+        type=json.loads,
+        default={},
+        metavar="JSON",
+        help="more assay_kwargs, e.g. '{\"mate_children\": 64}' for gama",
     )
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--rel-tol", type=float, default=0.02)
@@ -165,6 +174,7 @@ def main() -> int:
             orchestrator=a.orchestrator,
             max_procs=a.max_procs,
             trial_batchsize=a.trial_batchsize,
+            assay_kwargs=a.assay_kwargs,
         )
     except KeyError as e:
         p.error(e.args[0])

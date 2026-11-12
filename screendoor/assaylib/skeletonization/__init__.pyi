@@ -1,4 +1,5 @@
 from . import ddmin as ddmin
+from . import gama as gama
 from . import hybrid as hybrid
 from . import jenga as jenga
 from . import minesweeper as minesweeper

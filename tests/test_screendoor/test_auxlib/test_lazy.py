@@ -21,6 +21,7 @@ def test_attribute_chain():
     assert callable(scd.orch.slurm.launch)
     assert callable(scd.assaylib.skeletonization.hybrid.churn)
     assert "hybrid" in dir(scd.assaylib.skeletonization)
+    assert callable(scd.assaylib.skeletonization.gama.churn)
     assert scd.auxlib.canonical_json({"b": 1, "a": 2}) == '{"a":2,"b":1}'
 
 

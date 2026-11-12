@@ -23,6 +23,7 @@ from ._masks import ACCEPT, UNKNOWN, singletons
 
 class KnockoutSearch:
     policy = ""  # each subclass names its policy
+    policy_kwargs: tuple = ()  # assay_kwargs its __init__ takes besides
 
     def __init__(
         self,
@@ -64,6 +65,7 @@ class KnockoutSearch:
         self.commits_since_audit = 0
         self.stopped = ""  # why the search gave up, if it did
         self.phase = "start"
+        self.stats: dict = {}  # a policy's own figures, for the summary
 
     # -- evaluation ------------------------------------------------------
     def evaluate(self, candidates, *, stop_after_accept=False, fresh=False):
@@ -92,9 +94,10 @@ class KnockoutSearch:
                 break
         return result
 
-    def test(self, masks, kind, *, stop_after_accept=False):
+    def test(self, masks, kind, *, stop_after_accept=False, remember=True):
         """Generator: verdicts for deleting each mask from the current
-        genotype, as one proposal batch."""
+        genotype, as one proposal batch. They feed the proposal memory
+        unless ``remember`` is false."""
         masks = list(dict.fromkeys(masks))
         if not masks:
             return {}
@@ -111,17 +114,20 @@ class KnockoutSearch:
             [parent - d for d in masks], stop_after_accept=stop_after_accept
         )
         result = {d: outcomes[parent - d] for d in masks}
-        for d, v in result.items():
-            self.memory.observe(parent, d, v)
+        if remember:
+            for d, v in result.items():
+                self.memory.observe(parent, d, v)
         return result
 
-    def test_all(self, masks, kind, *, until=None):
+    def test_all(self, masks, kind, *, until=None, remember=True):
         """Generator: test ``masks`` batch by batch, ending early if the
         search stops or the mask ``until`` is accepted."""
         outcomes: dict = {}
         for start in range(0, len(masks), self.b):
             batch = masks[start : start + self.b]
-            outcomes.update((yield from self.test(batch, kind)))
+            outcomes.update(
+                (yield from self.test(batch, kind, remember=remember))
+            )
             if self.stopped or outcomes.get(until) == ACCEPT:
                 break
         return outcomes

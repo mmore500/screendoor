@@ -119,6 +119,8 @@ def _summary(kw, search, result, n, trials, waves) -> dict:
     }
     if result["unresolved"]:
         summary["unresolved"] = result["unresolved"]
+    if search.stats:
+        summary["stats"] = search.stats
     if "sequence" in kw:
         summary["skeleton"] = _masked_sequence(kw, retained)
     return summary
@@ -138,7 +140,11 @@ def search_churn(search_class, dispatch, trial_submissions, trial_payloads):
         range(n),
         batch_size=int(kw.get("batch_size", 8)),
         seed=seed,
-        **{k: kw[k] for k in SEARCH_KWARGS if k in kw},
+        **{
+            k: kw[k]
+            for k in (*SEARCH_KWARGS, *search_class.policy_kwargs)
+            if k in kw
+        },
     )
     wildtype = search.original
     by_key = {canonical_json(t["key"]): t for t in trials}

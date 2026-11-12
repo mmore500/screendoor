@@ -18,6 +18,16 @@ python3 -m screendoor.daemon.run_busyloop --dispatchdir work
 ```
 
 The organism is a name in `organisms.json`, or `seq:<genome>`.
+`--policy` is `ddmin`, `minesweeper`, `hybrid` or `gama`. `--assay-kwargs
+JSON` adds more assay_kwargs. GAMA's defaults are the paper's
+cluster-scale population sizes, so smaller ones are a good idea here:
+
+```bash
+python3 make_dispatch.py nand_50 --policy gama --assay-kwargs \
+  '{"guess_subsets": 16, "add_combinations": 32, "elite_size": 8,
+    "mate_children": 24, "mate_patience": 3}'
+```
+
 `run_local.sh [dispatchdir]` submits every policy for several organisms and
 runs the busy-loop daemon with the subprocess orchestrator. With
 `KILL_AFTER_S=N`, it SIGKILLs the daemon after N seconds and restarts it.

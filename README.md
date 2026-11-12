@@ -152,6 +152,7 @@ uses to re-run each churn call from the state it saw.
 | `scd.assaylib.skeletonization.ddmin` | Parallel partition-union delta debugging |
 | `scd.assaylib.skeletonization.minesweeper` | 4-stage Minesweeper (Rees-Garbutt 2020) |
 | `scd.assaylib.skeletonization.hybrid` | Multi-dose pilot, then top-down ddmin or bottom-up sieve |
+| `scd.assaylib.skeletonization.gama` | Guess/Add/Mate genetic algorithm (Rees-Garbutt 2020) |
 
 Each assay's docstring lists its kwargs (for the skeletonization
 strategies, see docs/skeletonization.md). Pass/fail results are `true` or

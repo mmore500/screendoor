@@ -1,4 +1,4 @@
-"""All three 2026-11-03 policies on real Avida, through the real worker."""
+"""The knockout policies on real Avida, through the real worker."""
 
 import asyncio
 import json
@@ -34,13 +34,14 @@ EXPECTED = {  # minimal skeletons from the 2026-11-03 benchmark report
 }
 
 
-def run(organism, policy, seed=42):
+def run(organism, policy, seed=42, **assay_kwargs):
     d = make_dispatch(
         organism,
         policy=policy,
         search_seed=seed,
         binary=BINARY,
         orchestrator="none",
+        assay_kwargs=assay_kwargs,
     )
     return simulate_dispatch(
         d.pop("assay"), d.pop("assay_kwargs"), trial_batchsize=1
@@ -55,6 +56,26 @@ def test_known_skeletons(organism, policy):
     s = r["completed"]["summary"]
     assert s["certified"]
     assert s["skeleton"] == EXPECTED[organism]
+
+
+@pytest.mark.parametrize("organism", sorted(EXPECTED))
+def test_gama_known_skeletons(organism):
+    """GAMA with small populations: the paper's sizes are for a cluster."""
+    r = run(
+        organism,
+        "gama",
+        guess_subsets=16,
+        add_combinations=32,
+        elite_size=8,
+        mate_children=24,
+        mate_patience=3,
+    )
+    assert r["completed"]["outcome"] == "succeeded", r["completed"]
+    s = r["completed"]["summary"]
+    assert s["certified"]
+    assert s["skeleton"] == EXPECTED[organism]
+    by_stage = s["stats"]["deleted"]
+    assert by_stage["guess"] < by_stage["add"] <= by_stage["mate"]
 
 
 @pytest.mark.skipif(

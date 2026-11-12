@@ -2,6 +2,15 @@
 History
 =======
 
+Unreleased
+----------
+
+* Assay ``skeletonization.gama``: the Guess/Add/Mate genetic algorithm of
+  Rees-Garbutt et al. (2020), with the paper's population sizes as
+  defaults. Knockout search summaries can carry policy ``stats``.
+* docs/skeletonization.md lists where ``minesweeper`` differs from the
+  paper's algorithm.
+
 0.1.0 (2026-11-12)
 ------------------
 

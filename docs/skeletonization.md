@@ -1,8 +1,8 @@
 # Knockout skeletonization assays
 
-`scd.assaylib.skeletonization.{ddmin,minesweeper,hybrid}` sample a
+`scd.assaylib.skeletonization.{ddmin,minesweeper,hybrid,gama}` sample a
 fitness-acceptable, single-deletion-minimal *skeleton* of a genome by
-knocking out sites. They port the policies of the 2026-11-03
+knocking out sites. The first three port the policies of the 2026-11-03
 `knockout_skeleton` package (`search.py`, exact-oracle mode) to screendoor:
 
 * **ddmin**: parallel partition-union delta debugging: disjoint chunk
@@ -14,14 +14,18 @@ knocking out sites. They port the policies of the 2026-11-03
 * **hybrid**: one multi-dose pilot batch (50/25/12.5% doses); then top-down
   ddmin with pivots to a bottom-up singleton sieve and subspace reduction.
 
-All three finish with a complete singleton sweep and a fresh final audit, as
+**gama** is new here: the Guess/Add/Mate genetic algorithm of Rees-Garbutt
+et al. (2020) (see [GAMA](#gama) below).
+
+All four finish with a complete singleton sweep and a fresh final audit, as
 in the original. Every committed deletion was tested directly against the
 fixed wildtype reference.
 
 Each policy reads in its own file (`ddmin/_churn.py`, `minesweeper/_churn.py`,
-`hybrid/_churn.py`, where hybrid builds on ddmin's partition-union). The
-machinery they share (evaluation, combination, audits and rollback, the final
-sweep, and replaying a search as churn) is in `skeletonization/_knockout/`.
+`hybrid/_churn.py`, where hybrid builds on ddmin's partition-union, and
+`gama/_churn.py`). The machinery they share (evaluation, combination, audits
+and rollback, the final sweep, and replaying a search as churn) is in
+`skeletonization/_knockout/`.
 
 ## How it maps onto churn
 
@@ -78,12 +82,110 @@ it is false if the search stopped early (`max_proposal_batches`, an audit
 it could not resolve, or too many rollbacks), and `summary.status` says
 why.
 
+## GAMA
+
+Rees-Garbutt et al. 2020, "Designing minimal genomes using whole-cell
+models", *Nat. Commun.* 11:836. Where the paper leaves a detail open, the
+authors' code (GriersonMarucciLab/GAMA and whole_cell_modelling_suite)
+settles it.
+
+1. **Screen.** Knock out each site alone. The sites whose loss is
+   acceptable are the *candidates*.
+2. **Guess.** Split the candidates into `guess_sets` consecutive sets
+   (four of about 40 genes in the paper). For each set, draw
+   `guess_subsets` random deletions of 50 to 100% of the set, with the
+   size drawn evenly from that range. The viable ones go forward.
+3. **Add.** `add_combinations` times, pick 2 to all of the sets that have
+   a viable guess, and one viable guess from each, and take their union.
+4. **Mate.** Each generation has `mate_children` children. A child's
+   parents are two of the `elite_size` largest viable deletions so far,
+   drawn in proportion to their sizes (the authors' code; the paper says
+   "at random"). The child inherits a random number of sites, picked at
+   random, from the first parent and the rest from the second. With
+   `mutation_probability`, it then flips a random number of sites
+   anywhere in the genome, knocking them out or back in. That number is
+   about exponential with mean `mutation_mean`, and at least one. A site
+   that is essential on its own can go this way, as in the paper. The
+   elite is updated after every generation. Mate stops after
+   `mate_generations` generations, or after `mate_patience` in a row that
+   find no larger deletion. The paper's run was stopped by hand under
+   that rule, after 46 generations.
+5. The largest viable deletion is committed. The common singleton sweep
+   and audit then make it single-deletion minimal and certify it.
+   The paper stops at step 4 and then hand-picks knock-ins to raise the
+   division rate.
+
+Every guess, union and child is tested against the wildtype, not against
+the current genome, and only genotypes that have not been tested yet are
+sent. `batch_size` therefore sets only how many go per wave: it changes
+neither which deletions are tried nor the result. On a cluster, set it to
+about one generation (the paper used 1000). Each churn call replays the
+whole search, which stays cheap: about 0.4 s for 3,750 trials.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `guess_sets` | 4 | Sets the candidates are split into |
+| `guess_subsets` | 400 | Random deletions drawn per set |
+| `guess_min_fraction` | 0.5 | Smallest guess, as a fraction of its set (the authors' runs used about 0.7) |
+| `add_combinations` | 3000 | Unions of viable guesses |
+| `elite_size` | 50 | Largest viable deletions kept as parents |
+| `mate_children` | 1000 | Children per generation |
+| `mate_generations` | 100 | Most generations |
+| `mate_patience` | 20 | Generations in a row without a larger deletion before stopping (`null`: never) |
+| `mutation_probability` | 0.4 | Chance a child is mutated (the authors' GAMA scripts; their library default is 0.1) |
+| `mutation_mean` | 2 | Mean number of sites a mutation flips |
+
+These defaults are the paper's, which is about 10,000 to 40,000 trials even
+on a 50 to 120 site toy landscape. For tests, or for genomes the other
+policies can handle, much smaller numbers work: the Avida test uses 16
+guesses, 32 unions, an elite of 8, 24 children and a patience of 3. The
+summary's `stats` gives the candidates, viable guesses per set, viable
+unions, generations run, and the largest deletion after each stage
+(`deleted`).
+
+The paper runs on the stochastic *M. genitalium* whole-cell model. Here,
+use `replicates` with `accept_fraction` to get the same kind of verdicts.
+
+## Minesweeper and the paper
+
+`minesweeper` ports the 2026-11-03 policy exactly, and that policy is a
+budgeted version of the paper's Minesweeper:
+
+* Stage 2's 26 segments are made the same way as in the paper. Sizes are
+  rounded rather than truncated, and the 50/33/25/12.5% segments are even
+  splits. The authors' script used uneven chunks of `trunc(p*m)+1` sites,
+  so their last 12.5% segment can come out empty.
+* Stage 3 commits the 100% segment if it passes. Otherwise it runs up to
+  `combination_rounds` batches of union proposals over the passing
+  segments, where the paper simulates the whole powerset of the largest
+  segment with every passing segment it does not overlap. It also follows
+  one variant, where the paper follows three (red, yellow, blue).
+* Stage 4 tests each of the 8 groups alone and combines the ones that
+  pass. The paper appends each of the 255 nonempty unions of the groups.
+  The paper's fallback, appending remaining genes one at a time and
+  leaving out the ones that fail, is replaced by the common singleton
+  sweep.
+* Stage 1 screens every site; the paper skipped RNA genes.
+
+On 24 synthetic landscapes (`essential`, `redundancy`, `mixed`, `rescue`;
+50 and 120 sites; 3 seeds), the port was compared with a paper-exact,
+single-variant Minesweeper written for the comparison and not shipped
+here. They reached the same skeleton size on the 18
+landscapes without a rescue pair. On each of the 6 `rescue` landscapes, the
+paper-exact version stopped one site short of single-deletion minimal,
+because it only deletes sites that pass the stage-1 screen. The port's
+final sweep removed that site. Across all 24, the paper-exact version used
+about 4 times as many trials (24,226 against 5,944 at `batch_size` 8).
+
 ## Checked against the original
 
 On Avida, `examples/avida/run_local.sh` (5 organisms, 3 policies, the daemon
 SIGKILLed and restarted midway) retained the same sites as the original for
 every organism and policy, and `test_matches_original_on_avida` checks this
-in the test suite.
+in the test suite. GAMA has no counterpart in the original.
+`test_gama_known_skeletons` checks that it finds the benchmark's minimal
+skeletons for `default_heads_50` and `nand_50`, and it did so with two
+search seeds each.
 
 ## Not ported
 
