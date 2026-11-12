@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: 'screendoor: dynamic screens driven by append-only records'
+authors:
+- family-names: Moreno
+  given-names: Matthew Andres
+  orcid: 0000-0003-4726-4479
+license: MIT
+repository-code: https://github.com/mmore500/screendoor
+version: 0.1.0

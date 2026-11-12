@@ -1,0 +1,10 @@
+{
+  "default_heads_50": "wzcagcccccccccccccccccccccccccccccccccccczvfcaxgab",
+  "default_heads_100": "wzcagcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccczvfcaxgab",
+  "nand_50": "wzcagcccccyycuybccccccccccccccccccccccccczvfcaxgab",
+  "redundant_nand_50": "wzcagcccyycuybcccccyycuybcccccccccccccccczvfcaxgab",
+  "not_nand_50": "wzcagcccyopcuybccccyycuybcccccccccccccccczvfcaxgab",
+  "small_effect_mb_50": "wzcagcmbmbmbmbmbmbmbmbmbmbyycuybccccccccczvfcaxgab",
+  "small_effect_vb_50": "wzcagcvbvbvbvbvbvbvbvbvbvbyycuybccccccccczvfcaxgab",
+  "evolved_9task_67": "ajwjagcxzycnuvycecrqucfpucyaocmbvpvucyvvuoyycvvvvmvfcfgavqvavvvvpvx"
+}

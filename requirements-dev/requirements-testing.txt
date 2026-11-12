@@ -1,0 +1,7 @@
+black==22.10.0
+coverage>=7.6.1
+isort==5.12.0
+pytest-xdist==2.5.0
+pytest==8.3.3
+ruff==0.1.11
+sybil>=6.1.1
