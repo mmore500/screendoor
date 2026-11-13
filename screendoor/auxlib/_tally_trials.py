@@ -1,20 +1,18 @@
 def tally_trials(trials: list[dict]) -> dict:
     """Count what happened across folded trials.
 
-    ``retries`` are relaunches after a job vanished. ``kills`` are
-    attempts cancelled by kill_dispatch. ``warnings`` are values trials
-    sent on the ``warning`` channel.
-
     Parameters
     ----------
     trials : list of dict
-        Folded trials, as from scd.churn.fold_trials.
+        Folded trials, as from `scd.churn.fold_trials`.
 
     Returns
     -------
     dict
-        Counts of ``trials``, ``succeeded``, ``failed``, ``retries``,
-        ``kills`` and ``warnings``.
+        Counts of `trials`, `succeeded`, `failed`, `retries` (relaunches
+        after a job vanished), `kills` (attempts cancelled by
+        `kill_dispatch`) and `warnings` (values sent on the `warning`
+        channel).
     """
     return {
         "trials": len(trials),

@@ -4,23 +4,11 @@ import argparse
 import sys
 
 from ..auxlib._format_cli_description import format_cli_description
+from ._worker import worker
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the worker from the command line.
-
-    Parameters
-    ----------
-    argv : list of str or None, default None
-        The arguments; ``sys.argv[1:]`` if None.
-
-    Returns
-    -------
-    int
-        The process exit code.
-    """
-    from ._worker import worker
-
+    """Run the worker from the command line; return the exit code."""
     parser = argparse.ArgumentParser(
         prog="python3 -m screendoor.trial.worker",
         description=format_cli_description(__doc__),

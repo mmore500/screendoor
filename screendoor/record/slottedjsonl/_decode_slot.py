@@ -4,11 +4,11 @@ from ._slot import digest
 
 
 def decode_slot(i: int, raw: bytes) -> dict | None:
-    """Return the record in slot ``i``'s bytes; None unless it is valid.
+    """Decode the record held in the bytes of slot `i`.
 
-    A slot is valid if it parses as an envelope whose index is ``i`` and
-    whose digest matches its record. Empty, torn, mixed and misplaced
-    slots all give None.
+    A slot is valid when its bytes parse as an envelope whose index is `i`
+    and whose digest matches its record. Empty, torn, mixed and misplaced
+    slots are all invalid.
 
     Parameters
     ----------

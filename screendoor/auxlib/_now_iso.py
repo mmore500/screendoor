@@ -1,17 +1,17 @@
 import datetime
 import time
 
-# screendoor.testing.FakeClock swaps these in, so tests run in fake time
+# screendoor.testing.FakeClock swaps these in to run screendoor in fake time
 _clock: dict = {"now": None, "sleep": None}
 
 
 def now() -> datetime.datetime:
-    """Current local time, timezone-aware.
+    """Return the current local time, timezone-aware.
 
     Returns
     -------
     datetime.datetime
-        The time, or the FakeClock's while one is installed.
+        The current time, or the installed FakeClock's.
     """
     if _clock["now"] is not None:
         return _clock["now"]()
@@ -19,12 +19,12 @@ def now() -> datetime.datetime:
 
 
 def sleep(seconds: float) -> None:
-    """Sleep ``seconds``, or advance the FakeClock while one is installed.
+    """Sleep for `seconds`, or advance the installed FakeClock by as much.
 
     Parameters
     ----------
     seconds : float
-        How long; negative counts as zero.
+        How long to sleep; a negative value counts as zero.
     """
     if _clock["sleep"] is not None:
         return _clock["sleep"](seconds)
@@ -32,25 +32,27 @@ def sleep(seconds: float) -> None:
 
 
 def now_iso() -> str:
-    """Current time in UTC as ISO-8601, to the microsecond, so that record
-    timestamps sort as strings.
+    """Return the current time in UTC as an ISO-8601 timestamp.
+
+    Timestamps carry microseconds, so that record timestamps sort correctly
+    as strings.
 
     Returns
     -------
     str
-        The timestamp, e.g. ``2026-01-02T03:04:05.000006+00:00``.
+        The timestamp, such as `2026-01-02T03:04:05.000006+00:00`.
     """
     utc = now().astimezone(datetime.timezone.utc)
     return utc.isoformat(timespec="microseconds")
 
 
 def parse_iso(ts: str) -> datetime.datetime:
-    """Parse an ISO-8601 timestamp, such as from now_iso.
+    """Parse an ISO-8601 timestamp, such as one from `now_iso`.
 
     Parameters
     ----------
     ts : str
-        The timestamp; without a timezone, it is taken as local time.
+        The timestamp; one without a timezone is taken as local time.
 
     Returns
     -------

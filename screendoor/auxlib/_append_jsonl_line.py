@@ -3,66 +3,48 @@ import os
 from ._canonical_json import canonical_json
 from ._now_iso import now_iso
 
-SCHEMA = 1
-
-# called as hook(path, record) after each append; for crash-injection tests
+# called as hook(path, record) after each append; crash-injection tests use it
 _after_append_hooks: list = []
 
 
 def stamp(record: dict) -> dict:
-    """``record`` (a dict with "event") with a fresh ``schema`` and ``ts``
-    in front, replacing any it had.
+    """Return a copy of `record` led by a fresh `ts`, then its `event`.
 
     Parameters
     ----------
     record : dict
-        The record to stamp.
+        A record with an `event` field; any `ts` it has is replaced.
 
     Returns
     -------
     dict
-        A copy, led by ``schema``, ``ts`` and ``event``.
+        The stamped copy.
     """
-    fields = {
-        k: v for k, v in record.items() if k not in ("schema", "ts", "event")
-    }
-    return {
-        "schema": SCHEMA,
-        "ts": now_iso(),
-        "event": record["event"],
-        **fields,
-    }
+    fields = {k: v for k, v in record.items() if k not in ("ts", "event")}
+    return {"ts": now_iso(), "event": record["event"], **fields}
 
 
 def run_after_append_hooks(path: str, record: dict) -> None:
-    """Call each after-append hook as ``hook(path, record)``.
-
-    Parameters
-    ----------
-    path : str
-        The file appended to.
-    record : dict
-        The record appended, as stamped.
-    """
+    """Call each registered after-append hook as `hook(path, record)`."""
     for hook in list(_after_append_hooks):
         hook(path, record)
 
 
 def append_jsonl_line(path: str, record: dict) -> dict:
-    """Append ``record`` (a dict with "event"), stamped, as one line in a
-    single ``write()``; return it as stamped.
+    """Append `record`, stamped, to the JSONL file `path` as one line
+    written in a single `write()`.
 
     Parameters
     ----------
     path : str
-        The JSONL file, created with its directories if missing.
+        The JSONL file; it and its directories are created if missing.
     record : dict
-        The record to append.
+        A record with an `event` field.
 
     Returns
     -------
     dict
-        The record as stamped.
+        The record as stamped and written.
 
     Raises
     ------

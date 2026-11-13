@@ -5,23 +5,12 @@ import json
 import sys
 
 from ..auxlib._format_cli_description import format_cli_description
+from ._print_status import dispatch_status, print_status
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run print_status, or dispatch_status with ``--json``.
-
-    Parameters
-    ----------
-    argv : list of str or None, default None
-        The arguments; None for ``sys.argv[1:]``.
-
-    Returns
-    -------
-    int
-        The exit code: 0.
-    """
-    from ._print_status import dispatch_status, print_status
-
+    """Run `print_status` (or, with `--json`, `dispatch_status`) from the
+    command line; return the exit code."""
     parser = argparse.ArgumentParser(
         prog="python3 -m screendoor.daemon.print_status",
         description=format_cli_description(__doc__),

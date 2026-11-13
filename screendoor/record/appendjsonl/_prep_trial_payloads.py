@@ -1,16 +1,14 @@
-from __future__ import annotations
-
 import typing
 
 
 def prep_trial_payloads() -> typing.Callable[[dict, int], None]:
-    """Do nothing: an appended trial_payloads.jsonl needs no room made.
+    """Create a `how_prep_trial_payloads` hook that does nothing: an
+    appended `trial_payloads.jsonl` needs no room made in advance.
 
     Returns
     -------
     Callable[[dict, int], None]
-        The ``how_prep_trial_payloads`` hook: ``(ctx, n_trials)`` does
-        nothing.
+        Hook `prep_trial_payloads(ctx, n_trials)`.
     """
 
     def prep_trial_payloads(ctx: dict, n_trials: int) -> None:

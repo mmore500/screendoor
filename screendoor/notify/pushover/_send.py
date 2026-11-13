@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 import os
 import urllib.parse
@@ -15,27 +13,28 @@ PRIORITY = {
 
 
 def _post(url: str, body: bytes) -> None:
-    """POST ``body``; tests replace this."""
+    """POST `body` to `url`; tests replace this."""
     urllib.request.urlopen(url, data=body, timeout=20).close()
 
 
 def send(ctx: dict, level: str, message: str) -> dict:
-    """Send one Pushover message; return the notify event describing it.
+    """Send one Pushover message.
 
     Parameters
     ----------
-    ctx : dict or dict
-        The dispatch, or the daemon, the message is from.
+    ctx : dict
+        The hook context of the dispatch, or of the daemon, the message is
+        from.
     level : str
-        The notification level, which sets the priority.
+        The notification level, which sets the message's priority.
     message : str
-        The text, cut to 1024 characters.
+        The text, truncated to 1024 characters.
 
     Returns
     -------
     dict
-        A ``sent`` or ``send_failed`` event, or ``suppressed`` if
-        ``$PUSHOVER_USER`` or ``$PUSHOVER_TOKEN`` is unset.
+        A `sent` or `send_failed` event, or a `suppressed` one if
+        `$PUSHOVER_USER` or `$PUSHOVER_TOKEN` is unset.
     """
     user = os.environ.get("PUSHOVER_USER")
     token = os.environ.get("PUSHOVER_TOKEN")

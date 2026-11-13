@@ -422,11 +422,24 @@ def test_gama_dispatch_reports_stages_and_keeps_best_when_out_of_budget():
 # -- judging scores against wildtype-vs-wildtype controls ------------------
 
 from screendoor.assaylib.skeletonization._knockout._controls import (  # noqa: E402
-    control_judge,
+    Controls,
     rank_pvalue,
     t_cdf,
     t_quantile,
 )
+
+
+def control_judge(kw, controls, replicates):
+    """The detectable-loss judge on a candidate's replicate scores, and a
+    summary of the controls with its threshold."""
+    c = Controls(kw, controls)
+    alpha = kw.get("alpha", 0.05)
+    threshold = c.threshold("detectable_loss", alpha, replicates)
+
+    def judge(scores):
+        return c.accepts(scores, "detectable_loss", alpha)
+
+    return judge, {**c.summary(), "threshold": threshold}
 
 
 @pytest.mark.parametrize(
@@ -601,10 +614,6 @@ def test_trials_get_the_wildtype_sequence():
 
 
 # -- noninferiority: screen on one replicate, then confirm -----------------
-
-from screendoor.assaylib.skeletonization._knockout._controls import (  # noqa: E402
-    Controls,
-)
 
 
 def test_rank_upper_pvalue_is_exact():

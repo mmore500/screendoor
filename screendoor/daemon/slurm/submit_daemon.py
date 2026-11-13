@@ -5,23 +5,12 @@ import sys
 
 from ...auxlib._begin_prod_logging import begin_prod_logging
 from ...auxlib._format_cli_description import format_cli_description
+from ._submit_daemon import submit_daemon
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run submit_daemon from the command line, printing any job id.
-
-    Parameters
-    ----------
-    argv : list of str or None, default None
-        The arguments; None for ``sys.argv[1:]``.
-
-    Returns
-    -------
-    int
-        The exit code: 0.
-    """
-    from ._submit_daemon import submit_daemon
-
+    """Run `submit_daemon` from the command line, printing any job id
+    queued; return the exit code."""
     parser = argparse.ArgumentParser(
         prog="python3 -m screendoor.daemon.slurm.submit_daemon",
         description=format_cli_description(__doc__),

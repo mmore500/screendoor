@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 import tarfile
 import typing
@@ -10,22 +8,22 @@ ARCHIVE = "trials.tar.gz"
 
 
 def tar(*, clear: bool = False) -> typing.Callable[[dict, dict], None]:
-    """Archive the run directory's ``trials/`` as ``trials.tar.gz`` beside
-    it; with ``clear``, then delete ``trials/``.
+    """Create a cleanup hook that archives the run directory's `trials/` as
+    `trials.tar.gz` beside it.
 
-    The archive is written to a temporary name and renamed into place, so
-    a crash never leaves a partial archive under the final name.
+    The archive is written under a temporary name and renamed into place,
+    so that a crash never leaves a partial archive under the final name.
 
     Parameters
     ----------
     clear : bool, default False
-        Whether to delete ``trials/`` once archived.
+        Whether to delete `trials/` once archived.
 
     Returns
     -------
     Callable[[dict, dict], None]
-        A ``how_cleanup_success`` or ``how_cleanup_failure`` hook:
-        ``(ctx, completed)`` archives ``trials/``, if there is one.
+        Hook `tar(ctx, completed)`, usable as `how_cleanup_success` or
+        `how_cleanup_failure`; it does nothing if there is no `trials/`.
     """
 
     def tar(ctx: dict, completed: dict) -> None:

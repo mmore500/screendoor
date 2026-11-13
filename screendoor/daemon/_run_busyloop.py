@@ -8,15 +8,16 @@ from ._signals import STOP
 
 
 def run_busyloop(dispatchdir: str, *, max_ticks: int | None = None) -> None:
-    """Tick, sleep until the next firing, repeat until none is active.
+    """Tick the dispatchdir's dispatches, sleeping until the next is due,
+    until none is active.
 
-    Tells how_notify_termination why the daemon stopped, unless it was
-    killed outright or reached ``max_ticks``.
+    `how_notify_termination` is told why the daemon stopped, unless it was
+    killed outright or reached `max_ticks`.
 
     Parameters
     ----------
     dispatchdir : str
-        The dispatchdir to tick.
+        Path of the dispatchdir.
     max_ticks : int or None, default None
         Return after this many passes; None for no limit.
     """

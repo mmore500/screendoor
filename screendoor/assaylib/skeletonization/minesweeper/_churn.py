@@ -11,7 +11,8 @@ from .._knockout import (
 
 
 def minesweeper_stage2_segments(sites: list[int]) -> list[frozenset]:
-    """The 26 multi-scale Stage-2 deletion segments (Rees-Garbutt 2020).
+    """Make the 26 multi-scale Stage-2 deletion segments of Rees-Garbutt et
+    al. (2020).
 
     Parameters
     ----------
@@ -42,16 +43,15 @@ class MinesweeperSearch(KnockoutSearch):
     policy = "minesweeper"
 
     def search(self) -> typing.Generator[dict, dict, str]:
-        """Generator: 4-stage Minesweeper divide and conquer (Rees-Garbutt
-        2020).
+        """Run 4-stage Minesweeper divide and conquer.
 
         Returns
         -------
         Generator[dict, dict, str]
-            Yields genotype batches, is sent their verdicts, and returns
-            the search's status.
+            Yields waves and is sent their verdicts; returns the search's
+            status.
         """
-        # Every site is screened, as in the original under an exact oracle.
+        # every site is screened, as in the original under an exact oracle
         stage1 = yield from self.test_all(
             singletons(sorted(self.current)), "minesweeper_stage1"
         )
@@ -98,9 +98,10 @@ class MinesweeperSearch(KnockoutSearch):
 def make_churn(
     *, num_control_trials: int = 40
 ) -> typing.Callable[[dict, list[dict], list[dict], list[dict]], list[dict]]:
-    """Skeletonize by 4-stage Minesweeper divide and conquer.
+    """Create a churn function that skeletonizes by 4-stage Minesweeper
+    divide and conquer.
 
-    See docs/skeletonization.md.
+    See docs/skeletonization.md for the assay kwargs.
 
     Parameters
     ----------
@@ -110,9 +111,9 @@ def make_churn(
 
     Returns
     -------
-    Callable
-        The churn function, ``churn(dispatch, trial_submissions,
-        trial_payloads, memo) -> actions``.
+    Callable[[dict, list[dict], list[dict], list[dict]], list[dict]]
+        The churn function, `churn(dispatch, trial_submissions,
+        trial_payloads, memo)`.
     """
     return make_search_churn(
         MinesweeperSearch, num_control_trials=num_control_trials

@@ -2,16 +2,16 @@ from ._validate import make_action
 
 
 def fail(reason: str) -> dict:
-    """Close the dispatch as failed.
+    """Create a `fail` action, completing the dispatch as failed.
 
     Parameters
     ----------
     reason : str
-        Why it failed.
+        Why the dispatch failed.
 
     Returns
     -------
     dict
-        The ``fail`` action.
+        The action.
     """
     return make_action("fail", reason=str(reason))

@@ -6,25 +6,26 @@ from ._select_dispatches import select_dispatches
 def kill_dispatch(
     dispatchdir: str, dispatch_uuids: list[str] | None = None
 ) -> list[str]:
-    """Cancel in-progress trials and pause their dispatches.
+    """Cancel the in-progress trials of dispatches and pause them.
 
-    Acts on every open dispatch, or on those whose uuids start with one
-    of ``dispatch_uuids``. A killed dispatch is not completed and its
-    trials are not failed: the daemon skips it until resume_dispatch, then
-    relaunches the cancelled trials without counting a retry. Safe to
-    repeat. Returns the uuids acted on.
+    Acts on every open dispatch, or on those whose uuids start with one of
+    `dispatch_uuids`. A killed dispatch is not completed and its trials are
+    not failed: the daemon skips it until `resume_dispatch`, which
+    relaunches the cancelled trials without counting a retry. Repeating a
+    kill is harmless.
 
     Parameters
     ----------
     dispatchdir : str
-        The dispatchdir holding the dispatches.
+        Path of the dispatchdir.
     dispatch_uuids : list of str or None, default None
-        Prefixes of the uuids to act on; None or empty for every one.
+        Prefixes of the uuids to act on; None or empty acts on every open
+        dispatch.
 
     Returns
     -------
     list of str
-        The dispatch_uuids acted on.
+        The `dispatch_uuid` of each dispatch acted on.
 
     Raises
     ------

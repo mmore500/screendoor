@@ -8,22 +8,20 @@ import typing
 def dispatchdir_lock(
     dispatchdir: str, *, wait: bool = False
 ) -> typing.Iterator[bool]:
-    """Yield whether this process got the dispatchdir's exclusive lock.
-
-    Keeps two local daemons from ticking at once. With ``wait``, block
-    until the lock is free.
+    """Hold the dispatchdir's exclusive lock for the duration of the block,
+    so that two local daemons never tick at once.
 
     Parameters
     ----------
     dispatchdir : str
-        The dispatchdir to lock; made if absent.
+        Path of the dispatchdir, created if missing.
     wait : bool, default False
-        Block until the lock is free, rather than yield False.
+        Whether to block until the lock is free, rather than yield False.
 
     Yields
     ------
     bool
-        Whether the lock is held, until the block exits.
+        Whether the lock is held.
     """
     os.makedirs(dispatchdir, exist_ok=True)
     with open(os.path.join(dispatchdir, ".screendoor.lock"), "a") as fh:

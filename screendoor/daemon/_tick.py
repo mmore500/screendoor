@@ -1,17 +1,12 @@
-from __future__ import annotations
-
 import logging
 import traceback
-import typing
 
+from ..auxlib._DispatchContext import DispatchContext
 from ..auxlib._fold_trial_events import fold_trial_events
 from ._apply_actions import apply_actions, check_actions, churn_step, complete
 from ._notify import flush_batched_notifications, notify
 from ._setup_dispatch import setup_dispatch
 from ._submit_trials import submit_trials
-
-if typing.TYPE_CHECKING:
-    from ..auxlib._DispatchContext import DispatchContext
 
 
 def _job_label(t: dict) -> str:
@@ -19,16 +14,17 @@ def _job_label(t: dict) -> str:
 
 
 def relaunch(ctx: DispatchContext, gone: set[str]) -> None:
-    """Request vanished trials again, or record them ``failed`` (lost).
+    """Request the vanished trials again, or record as `failed` (lost)
+    those that are out of retries.
 
-    A killed attempt does not count against ``trial_maxretry``.
+    A killed attempt does not count against `trial_maxretry`.
 
     Parameters
     ----------
     ctx : DispatchContext
         The dispatch ticking.
     gone : set of str
-        The trial_uuids whose jobs are gone or were killed.
+        The `trial_uuid` of each trial whose job is gone or was killed.
     """
     if not gone:
         return
@@ -98,7 +94,12 @@ def _record_churn_error(
 
 
 def tick(ctx: DispatchContext) -> None:
-    """One daemon pass over one open dispatch.
+    """Run one daemon pass over one open dispatch.
+
+    The pass sets the dispatch up if need be; polls its unsettled trials
+    and relaunches those whose jobs are gone; then, while
+    `how_unblock_churn` allows and churn keeps writing memos, calls churn
+    and carries out its actions. It ends by recording a `ticked` event.
 
     Parameters
     ----------

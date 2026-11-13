@@ -2,20 +2,20 @@ import typing
 
 
 def trial_result(trial: dict) -> typing.Any:
-    """A folded trial's result; raises RuntimeError if it has none.
+    """Return a folded trial's result.
 
     A trial has a result only if it succeeded and sent a non-null
-    ``payload``.
+    `payload`.
 
     Parameters
     ----------
     trial : dict
-        A folded trial, as from fold_trials.
+        A folded trial, as from `fold_trials`.
 
     Returns
     -------
     Any
-        The trial's ``result``.
+        The trial's `result`.
 
     Raises
     ------

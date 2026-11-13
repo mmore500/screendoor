@@ -1,19 +1,15 @@
-from __future__ import annotations
-
+import datetime
 import typing
-
-if typing.TYPE_CHECKING:
-    import datetime
 
 
 def notify() -> typing.Callable[..., list[dict]]:
-    """Do nothing.
+    """Create a notifier that discards every notification.
 
     Returns
     -------
-    Callable[..., list]
-        The notifier: ``(ctx, level, message, data, history, now)``
-        returns no events.
+    Callable[..., list[dict]]
+        Notifier `notify(ctx, level, message, data, history, now)`,
+        returning no events.
     """
 
     def notify(

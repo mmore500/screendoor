@@ -1,25 +1,20 @@
-from __future__ import annotations
-
+import datetime
 import typing
 
 from ._send import send
 
-if typing.TYPE_CHECKING:
-    import datetime
-
 
 def flush() -> typing.Callable[
-    [dict, str, list[dict], datetime.datetime],
-    list[dict],
+    [dict, str, list[dict], datetime.datetime], list[dict]
 ]:
-    """Retry up to three messages whose sends failed.
+    """Create a flush that retries the latest failed sends.
 
     Returns
     -------
-    Callable[[dict, str, list, datetime], list]
-        The flush: ``(ctx, level, history, now)`` resends the latest three
-        failed messages in ``history`` not since sent, and returns their
-        events.
+    Callable[[dict, str, list[dict], datetime.datetime], list[dict]]
+        Flush `flush(ctx, level, history, now)`, which resends the latest
+        three messages in `history` whose sends failed and were not since
+        sent, and returns their events.
     """
 
     def flush(

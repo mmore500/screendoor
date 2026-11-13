@@ -1,21 +1,27 @@
-from __future__ import annotations
-
 import typing
 
-from ._files import append, path
+from ._files import write_hook
 
 
-def write_churn_memo() -> typing.Callable[[dict, dict], dict]:
-    """Append one event to churn_memo.jsonl.
+def write_churn_memo(
+    *, lock: bool = False, timeout: float | None = None
+) -> typing.Callable[[dict, dict], dict]:
+    """Create a `how_write_churn_memo` hook that appends to the run
+    directory's `churn_memo.jsonl`.
+
+    Parameters
+    ----------
+    lock : bool, default False
+        Whether to write under an exclusive fcntl lock, for filesystems
+        where `O_APPEND` writes can tear (NFS across nodes).
+    timeout : float or None, default None
+        Seconds to wait for the lock before raising `LockTimeoutError`;
+        None waits as long as it takes.
 
     Returns
     -------
     Callable[[dict, dict], dict]
-        The ``how_write_churn_memo`` hook: ``(ctx, record)`` appends
-        ``record`` and returns it as stamped.
+        Hook `write_churn_memo(ctx, record)`, returning the record as
+        stamped and written.
     """
-
-    def write_churn_memo(ctx: dict, record: dict) -> dict:
-        return append(path(ctx, "churn_memo"), record)
-
-    return write_churn_memo
+    return write_hook("churn_memo", lock=lock, timeout=timeout)

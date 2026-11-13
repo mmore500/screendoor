@@ -1,5 +1,5 @@
-"""Slotted JSONL v0.1: one fixed-size, checksummed slot per record, so
-many writers can fill one shared file with no locks."""
+"""Trial payloads in fixed-size, checksummed slots of one shared file,
+which many writers can fill without locks."""
 
 from ...auxlib._lazy_attach_stub import lazy_attach_stub
 

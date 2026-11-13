@@ -23,7 +23,6 @@ from ._next_cron_firing import next_cron_firing as next_cron_firing
 from ._now_iso import now as now
 from ._now_iso import now_iso as now_iso
 from ._now_iso import parse_iso as parse_iso
-from ._read_jsonl_tolerant import SchemaTooNewError as SchemaTooNewError
 from ._read_jsonl_tolerant import read_jsonl_tolerant as read_jsonl_tolerant
 from ._tally_trials import tally_trials as tally_trials
 from ._weighted_subset import weighted_subset as weighted_subset

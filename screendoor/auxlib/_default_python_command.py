@@ -4,12 +4,14 @@ import sys
 
 
 def default_python_command() -> str:
-    """Shell command for this interpreter with this copy of screendoor.
+    """Build a shell command that runs this interpreter with this copy of
+    screendoor importable.
 
     Returns
     -------
     str
-        ``sys.executable``, run with this copy's root first on PYTHONPATH.
+        `sys.executable`, run with this copy's root prepended to
+        `PYTHONPATH`.
     """
     root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     return (

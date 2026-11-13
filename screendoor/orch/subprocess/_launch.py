@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 import shlex
 import subprocess
@@ -13,27 +11,28 @@ from ._procs import job_dir, read_pidfile
 def launch(
     *, worker: str | None = None, pidfile_wait_s: float = 30.0
 ) -> typing.Callable[[dict, str, list[list[dict]]], None]:
-    """Run each batch as a detached local process, under coreutils
-    ``timeout`` if ``trial_batch_timeout`` is set.
+    """Create a `how_launch` hook that runs each batch as a detached local
+    process, under coreutils `timeout` if the dispatch sets
+    `trial_batch_timeout`.
 
-    Batch ``i`` of job ``name`` writes ``jobs/<name>/<i>.pid`` in the run
-    directory as it starts, which is how poke, kill and throttle find it.
-    ``worker`` is the command that starts the worker; by default, this
-    interpreter's.
+    Batch `i` of job `name` writes `jobs/<name>/<i>.pid` in the run
+    directory as it starts, which is how `poke`, `kill` and `throttle` find
+    it.
 
     Parameters
     ----------
     worker : str or None, default None
-        The command that starts the worker.
+        The command that starts the worker; None uses this interpreter's,
+        from `default_python_command`.
     pidfile_wait_s : float, default 30.0
-        How long the hook waits for each batch to write its pidfile.
+        Seconds to wait for each batch to write its pidfile.
 
     Returns
     -------
-    Callable[[dict, str, list], None]
-        The ``how_launch`` hook: ``(ctx, name, batches)`` starts each
-        batch and waits until all have written their pidfiles. It raises
-        RuntimeError if one has not within ``pidfile_wait_s``.
+    Callable[[dict, str, list[list[dict]]], None]
+        Hook `launch(ctx, name, batches)`, which starts each batch and
+        waits until all have written their pidfiles, raising `RuntimeError`
+        if one has not within `pidfile_wait_s`.
     """
     worker = worker or f"{default_python_command()} -m screendoor.trial.worker"
 

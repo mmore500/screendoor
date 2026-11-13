@@ -178,12 +178,12 @@ at every recorded step and reports whether it decides the same.
 | `<run_dir>/trial_telemetry.jsonl` | `started`, `telemetry` |
 | `<run_dir>/churn_memo.jsonl`, `churn_notify.jsonl` | memos, notifications |
 
-Three backends provide the record hooks:
+Two backends provide the record hooks:
 
-* `scd.record.appendjsonl`: one `O_APPEND` write per line.
-* `scd.record.lockedjsonl`: the same under `fcntl` locks, for filesystems
-  where `O_APPEND` can tear lines (NFS across nodes). Hooks take
-  `timeout=`.
+* `scd.record.appendjsonl`: one `O_APPEND` write per line. With
+  `lock=True`, reads and writes hold `fcntl` locks, for filesystems where
+  `O_APPEND` can tear lines (NFS across nodes); `timeout=` bounds the wait
+  for a lock, in seconds.
 * `scd.record.slottedjsonl`: trial payloads only, each in a fixed-size,
   checksummed slot of `trial_payloads.slots.jsonl`, lock-free. Set the slot
   size once, as `prep_trial_payloads(slot_bytes=...)` (default 32768); a

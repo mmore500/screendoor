@@ -1,22 +1,22 @@
-from __future__ import annotations
-
 import os
 
-# a trial's payloads; the latest fills its slot
+# the trial payload events; the latest fills the trial's slot
 PAYLOAD_EVENTS = ("completed", "failed")
 
 
 def slots_path(ctx: dict) -> str:
-    """The dispatch's slotted file: slot ``task_id`` belongs to that trial.
+    """Return the path of the dispatch's slotted file,
+    `trial_payloads.slots.jsonl`, in which slot `task_id` belongs to that
+    trial.
 
     Parameters
     ----------
     ctx : dict
-        The dispatch.
+        The hook context.
 
     Returns
     -------
     str
-        The path of its trial_payloads.slots.jsonl.
+        The file's path.
     """
     return os.path.join(ctx["run_dir"], "trial_payloads.slots.jsonl")

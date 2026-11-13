@@ -1,10 +1,6 @@
-from __future__ import annotations
-
 import math
+import random
 import typing
-
-if typing.TYPE_CHECKING:
-    import random
 
 
 def weighted_subset(
@@ -13,28 +9,32 @@ def weighted_subset(
     weights: dict[int, float],
     rng: random.Random,
 ) -> frozenset[int]:
-    """Weighted sampling without replacement, by exponential clocks.
+    """Sample `size` of `sites` without replacement, favoring heavier
+    sites.
+
+    Each site draws an exponential clock with rate equal to its weight, and
+    the `size` earliest clocks are taken.
 
     Parameters
     ----------
     sites : collection of int
         The sites to sample from.
     size : int
-        How many to sample.
-    weights : dict
-        Weight by site; a site not in it weighs 1.
+        How many sites to sample.
+    weights : dict of {int: float}
+        Weight of each site; a site absent from `weights` has weight 1.
     rng : random.Random
-        The source of randomness.
+        Source of randomness.
 
     Returns
     -------
     frozenset of int
-        ``size`` of ``sites``, heavier ones likelier.
+        The sampled sites.
 
     Raises
     ------
     ValueError
-        If ``size`` is negative or more than ``len(sites)``.
+        If `size` is negative or exceeds `len(sites)`.
     """
     if not 0 <= size <= len(sites):
         raise ValueError("invalid subset size")

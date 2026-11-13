@@ -1,15 +1,10 @@
-from __future__ import annotations
-
 import logging
 import os
 import typing
 
-from ...auxlib._DispatchContext import load_dispatch
+from ...auxlib._DispatchContext import DispatchContext, load_dispatch
 from ...trial._run_trial import latest_request
 from ...trial._worker import worker
-
-if typing.TYPE_CHECKING:
-    from ...auxlib._DispatchContext import DispatchContext
 
 
 def _run_fake(
@@ -40,21 +35,22 @@ def _run_fake(
 def launch(
     *, fake_trial: typing.Callable[[dict], typing.Any] | None = None
 ) -> typing.Callable[[dict, str, list[list[dict]]], None]:
-    """Run each batch in-process, as the worker would, for tests.
-
-    With ``fake_trial``, call ``fake_trial(trial) -> result`` instead of
-    running each trial's script; raising fails the trial.
+    """Create a `how_launch` hook that runs each batch in-process, as the
+    worker would.
 
     Parameters
     ----------
     fake_trial : Callable[[dict], Any] or None, default None
-        Stands in for each trial's script, returning its result.
+        A function called as `fake_trial(trial)` in place of each trial's
+        script, returning the trial's result; raising fails the trial.
+        `trial` carries the trial's `trial_uuid`, `attempt`, `task_id`,
+        `key`, `cmd` and `env`. None runs the scripts.
 
     Returns
     -------
-    Callable[[dict, str, list], None]
-        The ``how_launch`` hook: ``(ctx, name, batches)`` runs every trial
-        in ``batches`` to completion, logging any that crash.
+    Callable[[dict, str, list[list[dict]]], None]
+        Hook `launch(ctx, name, batches)`, which runs every trial in
+        `batches` to completion, logging any that crashes.
     """
 
     def launch(ctx: dict, name: str, batches: list[list[dict]]) -> None:

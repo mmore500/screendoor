@@ -4,7 +4,8 @@ from ._validate import make_action
 
 
 def eta(eta: str | datetime.datetime) -> dict:
-    """Report the estimated completion time, as an ISO timestamp.
+    """Create an `eta` action, reporting the dispatch's estimated completion
+    time.
 
     Parameters
     ----------
@@ -14,12 +15,12 @@ def eta(eta: str | datetime.datetime) -> dict:
     Returns
     -------
     dict
-        The ``eta`` action.
+        The action, with `eta` as an ISO-8601 timestamp.
 
     Raises
     ------
     ValueError
-        If ``eta`` is a string but not ISO-8601.
+        If `eta` is a string that is not ISO-8601.
     """
     if isinstance(eta, datetime.datetime):
         eta = eta.isoformat()

@@ -4,12 +4,10 @@ from ._slot import DEFAULT_SLOT, SlotError, digest
 
 
 def encode_slot(i: int, record: dict, slot_bytes: int = DEFAULT_SLOT) -> bytes:
-    """Return the exact ``slot_bytes`` bytes that hold ``record`` in slot
-    ``i``.
+    """Encode `record` as the exact `slot_bytes` bytes of slot `i`.
 
-    The record is wrapped in an envelope ``{"h": digest, "i": i, "r":
-    record}``, padded with spaces and ended with a line feed. Raises
-    SlotError if the envelope does not fit, and ValueError on NaN.
+    The record is wrapped in an envelope `{"h": digest, "i": i, "r":
+    record}`, padded with spaces and ended with a line feed.
 
     Parameters
     ----------
@@ -28,11 +26,11 @@ def encode_slot(i: int, record: dict, slot_bytes: int = DEFAULT_SLOT) -> bytes:
     Raises
     ------
     TypeError
-        If ``record`` is not a dict or holds a value JSON cannot represent.
+        If `record` is not a dict or holds a value JSON cannot represent.
     SlotError
-        If the envelope does not fit in ``slot_bytes - 1`` bytes.
+        If the envelope does not fit in `slot_bytes - 1` bytes.
     ValueError
-        If ``record`` holds NaN or infinity.
+        If `record` holds NaN or infinity.
     """
     if not isinstance(record, dict):
         raise TypeError("record must be a dict (JSON object)")

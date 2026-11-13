@@ -1,12 +1,5 @@
-"""GAMA, the Guess/Add/Mate Algorithm of Rees-Garbutt et al. (2020),
-"Designing minimal genomes using whole-cell models", Nat. Commun. 11:836.
-
-Where the paper is silent (how two parents combine, how many sites a
-mutation flips), this follows the authors' genetic algorithm code
-(GriersonMarucciLab/whole_cell_modelling_suite, GriersonMarucciLab/GAMA).
-"""
-
 import math
+import typing
 
 from .._knockout import (
     ACCEPT,
@@ -19,14 +12,54 @@ from .._knockout import (
 
 
 class GamaSearch(KnockoutSearch):
-    """A single-site screen; random large deletions within each of four
-    sets of the non-essential sites (Guess); unions of viable ones across
-    sets (Add); then a genetic algorithm over the largest viable deletions
-    that may knock any site out or back in (Mate).
+    """GAMA, the Guess/Add/Mate Algorithm of Rees-Garbutt et al. (2020),
+    "Designing minimal genomes using whole-cell models", Nat. Commun.
+    11:836.
+
+    A single-site screen finds the non-essential sites; random large
+    deletions within each of several sets of them (Guess); unions of
+    viable ones across sets (Add); then a genetic algorithm over the
+    largest viable deletions, which may knock any site out or back in
+    (Mate). Where the paper is silent (how two parents combine, how many
+    sites a mutation flips), this follows the authors' code
+    (GriersonMarucciLab/whole_cell_modelling_suite and GAMA).
 
     Every deletion is tested against the wildtype, and only genotypes not
-    yet tested are sent, ``batch_size`` per wave: the batch size sets the
+    yet tested are sent, `batch_size` per wave: the batch size sets the
     pace, not which deletions are tried.
+
+    Parameters
+    ----------
+    sites : iterable of int
+        The wildtype's sites.
+    guess_sets : int, default 4
+        Sets the candidates are split into.
+    guess_subsets : int, default 400
+        Random deletions drawn per set.
+    guess_min_fraction : float, default 0.5
+        Smallest guess, as a fraction of its set.
+    add_combinations : int, default 3000
+        Unions of viable guesses to try.
+    elite_size : int, default 50
+        Largest viable deletions kept as parents.
+    mate_children : int, default 1000
+        Children per generation.
+    mate_generations : int, default 100
+        Most generations.
+    mate_patience : int or None, default 20
+        Generations in a row without a larger deletion before stopping;
+        None never stops early.
+    mutation_probability : float, default 0.4
+        Chance a child is mutated.
+    mutation_mean : float, default 2.0
+        Mean number of sites a mutation flips.
+    **kwargs
+        Passed to `KnockoutSearch`.
+
+    Raises
+    ------
+    ValueError
+        If a parameter is out of range.
     """
 
     policy = "gama"
@@ -45,7 +78,7 @@ class GamaSearch(KnockoutSearch):
 
     def __init__(
         self,
-        sites,
+        sites: typing.Iterable[int],
         *,
         guess_sets: int = 4,
         guess_subsets: int = 400,
@@ -54,11 +87,11 @@ class GamaSearch(KnockoutSearch):
         elite_size: int = 50,
         mate_children: int = 1000,
         mate_generations: int = 100,
-        mate_patience=20,
+        mate_patience: int | None = 20,
         mutation_probability: float = 0.4,
         mutation_mean: float = 2.0,
-        **kwargs,
-    ):
+        **kwargs: typing.Any,
+    ) -> None:
         super().__init__(sites, **kwargs)
         counts = (
             guess_subsets,
@@ -87,9 +120,16 @@ class GamaSearch(KnockoutSearch):
         self.sites = sorted(self.original)
         self.elite: list = []  # the largest viable deletions, largest first
 
-    def search(self):
-        """Generator: the single-site screen, Guess, Add and Mate; then
-        commit the largest viable deletion found."""
+    def search(self) -> typing.Generator[dict, dict, str]:
+        """Run the single-site screen, Guess, Add and Mate, then commit the
+        largest viable deletion found.
+
+        Returns
+        -------
+        Generator[dict, dict, str]
+            Yields waves and is sent their verdicts; returns the search's
+            status.
+        """
         screen = yield from self.test_all(
             singletons(self.sites), "gama_screen"
         )
@@ -110,9 +150,22 @@ class GamaSearch(KnockoutSearch):
             return "unresolved"
         return (yield from self.after_commit())
 
-    def guess_add_mate(self, candidates: list):
-        """Generator: the three stages, each promoting what it finds viable
-        to the elite. Returns early if the search stops."""
+    def guess_add_mate(
+        self, candidates: list[int]
+    ) -> typing.Generator[dict, dict, None]:
+        """Run the three stages, each promoting what it finds viable to the
+        elite; return early if the search stops.
+
+        Parameters
+        ----------
+        candidates : list of int
+            The non-essential sites, ascending.
+
+        Returns
+        -------
+        Generator[dict, dict, None]
+            Yields waves and is sent their verdicts.
+        """
         # Guess: random deletions of at least guess_min_fraction of each set
         k = min(self.guess_sets, len(candidates))
         guesses = [self.guess(sorted(s)) for s in split(candidates, k)]
@@ -157,10 +210,27 @@ class GamaSearch(KnockoutSearch):
             if len(self.elite[0]) > best:
                 best, stale = len(self.elite[0]), 0
 
-    def viable(self, masks, kind):
-        """Generator: the ``masks`` whose deletion from the wildtype is
-        accepted. Only genotypes not yet tested are sent. None feeds the
-        proposal memory, which is for proposals against one parent."""
+    def viable(
+        self, masks: typing.Iterable[frozenset[int]], kind: str
+    ) -> typing.Generator[dict, dict, list[frozenset[int]]]:
+        """Find which of `masks` are viable to delete from the wildtype.
+
+        Only genotypes not yet tested are sent. Nothing feeds the proposal
+        memory, which is for proposals against one parent.
+
+        Parameters
+        ----------
+        masks : iterable of frozenset of int
+            The deletions to test.
+        kind : str
+            The phase, set as `phase`.
+
+        Returns
+        -------
+        Generator[dict, dict, list of frozenset of int]
+            Yields waves and is sent their verdicts; returns the masks
+            whose deletion is accepted.
+        """
         masks = list(dict.fromkeys(masks))
         new = [d for d in masks if self.original - d not in self.cache]
         yield from self.test_all(new, kind, remember=False)
@@ -168,9 +238,25 @@ class GamaSearch(KnockoutSearch):
             d for d in masks if self.cache.get(self.original - d) == ACCEPT
         ]
 
-    def promote(self, masks, stage: str = "") -> list:
-        """Keep the ``elite_size`` largest of the elite and the viable
-        ``masks``, ties broken at random. Returns ``masks``."""
+    def promote(
+        self, masks: typing.Iterable[frozenset[int]], stage: str = ""
+    ) -> list[frozenset[int]]:
+        """Keep the `elite_size` largest of the elite and the viable
+        `masks`, breaking ties at random.
+
+        Parameters
+        ----------
+        masks : iterable of frozenset of int
+            Viable deletions to add to the elite.
+        stage : str, default ""
+            If given, record the largest deletion so far under it in
+            `stats["deleted"]`.
+
+        Returns
+        -------
+        list of frozenset of int
+            `masks`, as a list.
+        """
         masks = list(masks)
         ranked = list(dict.fromkeys([*self.elite, *masks]))
         self.rng.shuffle(ranked)
@@ -179,10 +265,21 @@ class GamaSearch(KnockoutSearch):
             self.stats["deleted"][stage] = len(self.elite[0])
         return masks
 
-    def guess(self, members: list) -> list:
-        """Random deletions within one set: a size drawn evenly from
-        ``guess_min_fraction`` of the set up to all of it, then that many
-        of its sites."""
+    def guess(self, members: list[int]) -> list[frozenset[int]]:
+        """Draw random deletions within one set: a size drawn evenly from
+        `guess_min_fraction` of the set up to all of it, then that many of
+        its sites.
+
+        Parameters
+        ----------
+        members : list of int
+            The set's sites.
+
+        Returns
+        -------
+        list of frozenset of int
+            `guess_subsets` draws, without repeats.
+        """
         m = len(members)
         low = max(1, math.ceil(self.guess_min_fraction * m))
         masks = (
@@ -191,13 +288,21 @@ class GamaSearch(KnockoutSearch):
         )
         return list(dict.fromkeys(masks))
 
-    def child(self) -> frozenset:
-        """Mate two of the elite, as the authors' code does: parents drawn
-        in proportion to their deletions' sizes; a random number of sites,
-        chosen at random, inherited from the first and the rest from the
-        second; then, with ``mutation_probability``, a random number of
-        sites (about exponential, mean ``mutation_mean``, at least one)
-        flipped between deleted and kept, anywhere in the genome."""
+    def child(self) -> frozenset[int]:
+        """Mate two of the elite, as the authors' code does.
+
+        The parents are drawn in proportion to their deletions' sizes. A
+        random number of sites, chosen at random, is inherited from the
+        first and the rest from the second. Then, with
+        `mutation_probability`, a random number of sites (about
+        exponential, with mean `mutation_mean`, and at least one) is
+        flipped between deleted and kept, anywhere in the genome.
+
+        Returns
+        -------
+        frozenset of int
+            The child's deletion.
+        """
         rng, n = self.rng, len(self.sites)
         (p1,) = rng.choices(self.elite, [len(d) for d in self.elite])
         rest = [d for d in self.elite if d != p1] or [p1]
@@ -219,11 +324,25 @@ class GamaSearch(KnockoutSearch):
         return frozenset(child)
 
 
-def make_churn(*, num_control_trials: int = 40):
-    """Skeletonize by GAMA, the Guess/Add/Mate genetic algorithm.
+def make_churn(
+    *, num_control_trials: int = 40
+) -> typing.Callable[[dict, list[dict], list[dict], list[dict]], list[dict]]:
+    """Create a churn function that skeletonizes by GAMA, the
+    Guess/Add/Mate genetic algorithm.
 
-    The wildtype runs ``num_control_trials`` times, as the controls every
-    genotype's scores are judged against. See docs/skeletonization.md.
+    See docs/skeletonization.md for the assay kwargs.
+
+    Parameters
+    ----------
+    num_control_trials : int, default 40
+        How many times the wildtype runs, as the controls every genotype's
+        scores are judged against.
+
+    Returns
+    -------
+    Callable[[dict, list[dict], list[dict], list[dict]], list[dict]]
+        The churn function, `churn(dispatch, trial_submissions,
+        trial_payloads, memo)`.
     """
     return make_search_churn(GamaSearch, num_control_trials=num_control_trials)
 

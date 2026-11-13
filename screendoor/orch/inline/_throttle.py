@@ -1,15 +1,14 @@
-from __future__ import annotations
-
 import typing
 
 
 def throttle() -> typing.Callable[[dict], bool]:
-    """Never throttle: inline trials end during launch.
+    """Create a `how_throttle_churn` hook that never throttles: inline
+    trials end during launch.
 
     Returns
     -------
     Callable[[dict], bool]
-        The ``how_throttle_churn`` hook: ``(ctx)`` always returns True.
+        Hook `throttle(ctx)`, always returning True.
     """
 
     def throttle(ctx: dict) -> bool:

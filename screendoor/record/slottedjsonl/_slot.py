@@ -6,11 +6,13 @@ DEFAULT_SLOT = 32768  # bytes: eight 4096-byte pages
 
 
 class SlotError(Exception):
-    """A record does not fit its slot, or the slot could not be written."""
+    """Raised when a record does not fit its slot, or a slot cannot be
+    written."""
 
 
 def check_slot(slot_bytes: int) -> None:
-    """Slots are whole memory pages, so no two share one.
+    """Check that `slot_bytes` is a whole number of memory pages, so that
+    no two slots share one.
 
     Parameters
     ----------
@@ -20,14 +22,15 @@ def check_slot(slot_bytes: int) -> None:
     Raises
     ------
     ValueError
-        If ``slot_bytes`` is not a positive multiple of 4096.
+        If `slot_bytes` is not a positive multiple of 4096.
     """
     if slot_bytes <= 0 or slot_bytes % 4096:
         raise ValueError("slot size must be a positive multiple of 4096")
 
 
 def placeholder(slot_bytes: int) -> bytes:
-    """The bytes of an unfilled slot: ``null``, spaces, a line feed.
+    """Return the bytes of an unfilled slot: `null`, spaces and a line
+    feed.
 
     Parameters
     ----------
@@ -43,7 +46,8 @@ def placeholder(slot_bytes: int) -> bytes:
 
 
 def digest(i: int, record: dict) -> str:
-    """BLAKE2b-64 of the canonical JSON of ``[i, record]``, as hex.
+    """Compute the BLAKE2b-64 digest of the canonical JSON of
+    `[i, record]`, as hex.
 
     Parameters
     ----------
@@ -60,9 +64,9 @@ def digest(i: int, record: dict) -> str:
     Raises
     ------
     TypeError
-        If ``record`` holds a value JSON cannot represent.
+        If `record` holds a value JSON cannot represent.
     ValueError
-        If ``record`` holds NaN or infinity.
+        If `record` holds NaN or infinity.
     """
     payload = json.dumps(
         [i, record],
@@ -75,12 +79,12 @@ def digest(i: int, record: dict) -> str:
 
 
 def pwrite_all(fd: int, buf: bytes, offset: int) -> None:
-    """Write all of ``buf`` at ``offset`` in one ``pwrite``.
+    """Write all of `buf` at `offset` of `fd` in one `pwrite`.
 
     Parameters
     ----------
     fd : int
-        The file to write.
+        The file descriptor to write to.
     buf : bytes
         The bytes to write.
     offset : int

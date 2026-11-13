@@ -4,7 +4,7 @@ from ._slot import DEFAULT_SLOT, check_slot, placeholder
 
 
 def init(path: str, n: int, slot_bytes: int = DEFAULT_SLOT) -> None:
-    """Create a file of ``n`` placeholder slots; fail if ``path`` exists.
+    """Create the slotted file `path` with `n` placeholder slots.
 
     Must finish before any writer for those slots starts.
 
@@ -20,9 +20,9 @@ def init(path: str, n: int, slot_bytes: int = DEFAULT_SLOT) -> None:
     Raises
     ------
     FileExistsError
-        If ``path`` exists.
+        If `path` exists.
     ValueError
-        If ``slot_bytes`` is not a positive multiple of 4096.
+        If `slot_bytes` is not a positive multiple of 4096.
     """
     check_slot(slot_bytes)
     with open(path, "xb") as fh:

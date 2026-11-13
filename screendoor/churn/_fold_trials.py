@@ -4,24 +4,26 @@ from ..auxlib._fold_trial_events import fold_trial_events
 def fold_trials(
     trial_submissions: list[dict], trial_payloads: list[dict]
 ) -> list[dict]:
-    """One dict per trial, from churn's raw trial submissions and payloads.
+    """Fold the raw trial records churn receives into one dict per trial.
 
-    Each dict has ``trial_uuid``, ``task_id``, ``key``, ``request``,
-    ``status`` (``requested``, ``killed``, ``succeeded`` or ``failed``),
-    ``state`` (``complete`` once succeeded or failed, else ``pending``),
-    ``attempt``, ``job``, ``result``, ``channels``, ``exit_code`` (None
-    until the trial ends, and for a lost one) and the ``retries`` and
-    ``kills`` counts. ``result`` is what the trial sent if it succeeded,
-    else None; read it with scd.churn.trial_result. Record order does not
-    matter: a payload from any attempt settles its trial, ``completed``
-    over ``failed``. Trials come in order of first request.
+    Each dict has `trial_uuid`, `task_id` (0, 1, 2, ... in request order),
+    `key`, `request`, `status` (`requested`, `killed`, `succeeded` or
+    `failed`), `state` (`complete` once succeeded or failed, else
+    `pending`), `attempt`, `job`, `result`, `channels`, `exit_code` (None
+    until the trial ends, and for a lost trial) and the `retries` and
+    `kills` counts. `result` is what the trial sent if it succeeded, else
+    None; read it with `trial_result`.
+
+    Record order does not matter: a payload from any attempt settles its
+    trial, with `completed` taking precedence over `failed`. Trials come in
+    order of first request.
 
     Parameters
     ----------
     trial_submissions : list of dict
-        The trial submissions churn got.
+        The trial submissions churn received.
     trial_payloads : list of dict
-        The trial payloads churn got.
+        The trial payloads churn received.
 
     Returns
     -------

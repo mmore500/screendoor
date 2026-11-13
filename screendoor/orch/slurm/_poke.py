@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 import typing
 
@@ -7,15 +5,16 @@ from . import _run_slurm_command as _rsc
 
 
 def poke() -> typing.Callable[[dict, list[dict]], set[str]]:
-    """One squeue call per tick: trials whose array task is not queued.
+    """Create a `how_poke` hook that reports trials whose array task is no
+    longer queued, with one `squeue` call per tick.
 
-    sacct is asked how the gone jobs ended, for the log only.
+    `sacct` is asked how the gone jobs ended, for the log only.
 
     Returns
     -------
-    Callable[[dict, list], set]
-        The ``how_poke`` hook: ``(ctx, trials)`` returns the uuids of the
-        trials whose array task is not queued; none if ``squeue`` fails.
+    Callable[[dict, list[dict]], set[str]]
+        Hook `poke(ctx, trials)`, returning the `trial_uuid` of each trial
+        whose array task is not queued; none if `squeue` fails.
     """
 
     def poke(ctx: dict, trials: list[dict]) -> set[str]:

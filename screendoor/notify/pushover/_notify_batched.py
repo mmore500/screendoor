@@ -1,20 +1,18 @@
-from __future__ import annotations
-
+import datetime
 import typing
 
 from ...auxlib._now_iso import parse_iso
 from ._send import send
 
-if typing.TYPE_CHECKING:
-    import datetime
-
 
 def notify_batched(
     *, interval_s: float = 3600
 ) -> typing.Callable[..., list[dict]]:
-    """Queue notifications; send one digest per ``interval_s``.
+    """Create a notifier that queues notifications and sends one digest per
+    `interval_s` seconds.
 
-    The digest groups repeats that share a ``dedupe_key``.
+    The digest groups repeats that share a `dedupe_key`. Messages held by a
+    digest whose send failed go out with the next one.
 
     Parameters
     ----------
@@ -23,12 +21,11 @@ def notify_batched(
 
     Returns
     -------
-    Callable[..., list]
-        The notifier: ``(ctx, level, message, data, history, now)``
-        returns a ``queued`` event for ``message``. Its ``flush``,
-        ``(ctx, level, history, now)``, sends what was queued since the
-        last digest that got through, at most once per ``interval_s``,
-        and returns the digest's event.
+    Callable[..., list[dict]]
+        Notifier `notify(ctx, level, message, data, history, now)`,
+        returning a `queued` event. Its `flush(ctx, level, history, now)`
+        sends what was queued since the last digest that got through, at
+        most once per `interval_s`, and returns the digest's event.
     """
 
     def notify(
@@ -52,8 +49,6 @@ def notify_batched(
         tried = max((parse_iso(h["ts"]) for h in digests), default=None)
         if tried and (now - tried).total_seconds() < interval_s:
             return []
-        # everything queued since the last digest that got through, so a
-        # failed digest's messages go out with the next one
         sent = [parse_iso(h["ts"]) for h in digests if h["event"] == "sent"]
         since = max(sent, default=None)
         groups: dict = {}  # dedupe_key -> [count, newest message]

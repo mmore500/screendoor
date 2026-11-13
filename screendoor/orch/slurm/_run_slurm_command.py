@@ -28,19 +28,22 @@ def run(argv: list[str]) -> str:
 
 
 def queued_jobs() -> dict[tuple[str, int | None], str]:
-    """Your queued and running jobs: ``{(name, array index): job id}``.
+    """List the user's queued and running jobs, as `{(name, array index):
+    job id}`.
 
-    One entry per array task; a job that is not an array has index None.
+    Each array task has its own entry; a job that is not an array has
+    index None.
 
     Returns
     -------
-    dict
-        Each queued or running array task's job id, by name and index.
+    dict of {(str, int or None): str}
+        The job id of each queued or running array task, by job name and
+        index.
 
     Raises
     ------
     RuntimeError
-        If ``squeue`` fails.
+        If `squeue` fails.
     """
     out = run(["squeue", "--me", "--noheader", "--array", "--format=%i|%j|%K"])
     jobs = {}

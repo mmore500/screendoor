@@ -1,21 +1,27 @@
-from __future__ import annotations
-
 import typing
 
-from ._files import append, path
+from ._files import write_hook
 
 
-def write_trial_payloads() -> typing.Callable[[dict, dict], dict]:
-    """Append one event to trial_payloads.jsonl.
+def write_trial_payloads(
+    *, lock: bool = False, timeout: float | None = None
+) -> typing.Callable[[dict, dict], dict]:
+    """Create a `how_write_trial_payloads` hook that appends to the run
+    directory's `trial_payloads.jsonl`.
+
+    Parameters
+    ----------
+    lock : bool, default False
+        Whether to write under an exclusive fcntl lock, for filesystems
+        where `O_APPEND` writes can tear (NFS across nodes).
+    timeout : float or None, default None
+        Seconds to wait for the lock before raising `LockTimeoutError`;
+        None waits as long as it takes.
 
     Returns
     -------
     Callable[[dict, dict], dict]
-        The ``how_write_trial_payloads`` hook: ``(ctx, record)`` appends
-        ``record`` and returns it as stamped.
+        Hook `write_trial_payloads(ctx, record)`, returning the record as
+        stamped and written.
     """
-
-    def write_trial_payloads(ctx: dict, record: dict) -> dict:
-        return append(path(ctx, "trial_payloads"), record)
-
-    return write_trial_payloads
+    return write_hook("trial_payloads", lock=lock, timeout=timeout)

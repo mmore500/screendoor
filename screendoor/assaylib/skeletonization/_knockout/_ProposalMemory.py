@@ -1,14 +1,12 @@
-"""Contextual proposal memory, ported from knockout_skeleton.memory.
-
-Verdicts are the strings "accept", "reject" and "unknown". No score here
-certifies a genotype.
-"""
-
 import math
 
 
 class ProposalMemory:
-    """The verdicts on past deletions, by the genotype each was made from.
+    """Memory of the verdicts on past deletions, by the genotype each was
+    made from, ported from `knockout_skeleton.memory`.
+
+    Verdicts are the strings `accept`, `reject` and `unknown`. No score
+    here certifies a genotype.
 
     Parameters
     ----------
@@ -30,7 +28,7 @@ class ProposalMemory:
     def observe(
         self, parent: frozenset, mask: frozenset, verdict: str
     ) -> None:
-        """Record the verdict on deleting ``mask`` from ``parent``.
+        """Record the verdict on deleting `mask` from `parent`.
 
         Parameters
         ----------
@@ -39,12 +37,12 @@ class ProposalMemory:
         mask : frozenset
             The sites deleted.
         verdict : str
-            ``accept``, ``reject`` or ``unknown``.
+            `accept`, `reject` or `unknown`.
 
         Raises
         ------
         ValueError
-            If ``mask`` is not contained in ``parent``.
+            If `mask` is not contained in `parent`.
         """
         if not mask <= parent:
             raise ValueError("a proposal mask must be contained in its parent")
@@ -55,11 +53,12 @@ class ProposalMemory:
             self._rejected.add((parent, mask))
 
     def forget_rejections(self) -> None:
-        """Forget every rejection, for verdicts under a new rule."""
+        """Forget every rejection, so that verdicts can follow a new
+        rule."""
         self._rejected.clear()
 
     def rejected_here(self, parent: frozenset, mask: frozenset) -> bool:
-        """Whether deleting ``mask`` from ``parent`` was rejected.
+        """Was deleting `mask` from `parent` rejected?
 
         Parameters
         ----------
@@ -76,8 +75,8 @@ class ProposalMemory:
         return (parent, mask) in self._rejected
 
     def weights(self, current: frozenset) -> dict[int, float]:
-        """Sampling weight per site: higher where deletions were accepted
-        in contexts like ``current``.
+        """Weight each site of `current` for sampling, higher where
+        deletions were accepted in contexts like `current`.
 
         Parameters
         ----------
@@ -87,8 +86,7 @@ class ProposalMemory:
         Returns
         -------
         dict of {int: float}
-            The weight of each site in ``current``, from 1 to
-            ``1 + strength``.
+            The weight of each site, from 1 to `1 + strength`.
         """
         scores = dict.fromkeys(current, 0.0)
         for parent, mask in self._accepted:
@@ -101,7 +99,7 @@ class ProposalMemory:
         }
 
     def donors(self, current: frozenset) -> list[frozenset]:
-        """Accepted masks, cut down to ``current``, largest first.
+        """List the accepted masks, cut down to `current`, largest first.
 
         Parameters
         ----------

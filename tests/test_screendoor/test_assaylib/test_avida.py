@@ -1,8 +1,10 @@
-"""The knockout policies on real Avida, through the real worker."""
+"""The knockout policies on real Avida, through the real worker and the
+devosoft/avida container."""
 
 import asyncio
 import json
 import os
+import shutil
 import sys
 
 import pytest
@@ -10,21 +12,14 @@ import pytest
 from screendoor.auxlib import decode_sites
 from screendoor.testing import simulate_dispatch
 
-REPO = os.path.dirname(
-    os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    )
-)
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), *[".."] * 3))
 sys.path.insert(0, os.path.join(REPO, "examples", "avida"))
-from make_dispatch import OLD, make_dispatch  # noqa: E402
+from make_dispatch import make_dispatch  # noqa: E402
 
-BINARY = os.environ.get(
-    "AVIDA_BINARY", os.path.join(OLD, "build/avida/bin/avida")
-)
 pytestmark = [
     pytest.mark.heavy,
     pytest.mark.skipif(
-        not os.path.exists(BINARY), reason="needs an Avida binary"
+        shutil.which("singularity") is None, reason="needs singularity"
     ),
 ]
 
@@ -33,19 +28,18 @@ EXPECTED = {  # minimal skeletons from the 2026-11-03 benchmark report
     "nand_50": "wzcagcAAAAyycuyAAAAAAAAAAAAAAAAAAAAAAAAAAzvfcaxgab",
 }
 
+# the original knockout_skeleton experiments, and the Avida they were run on
+OLD = os.path.expanduser("~/2026-11-03")
+OLD_BINARY = os.environ.get(
+    "AVIDA_BINARY", os.path.join(OLD, "build/avida/bin/avida")
+)
+
 
 def run(organism, policy, seed=42, **assay_kwargs):
     d = make_dispatch(
-        organism,
-        policy=policy,
-        search_seed=seed,
-        binary=BINARY,
-        orchestrator="none",
-        assay_kwargs=assay_kwargs,
+        organism, policy=policy, search_seed=seed, assay_kwargs=assay_kwargs
     )
-    return simulate_dispatch(
-        d.pop("assay"), d.pop("assay_kwargs"), trial_batchsize=1
-    )
+    return simulate_dispatch(d["assay"], d["assay_kwargs"], trial_batchsize=1)
 
 
 @pytest.mark.parametrize("policy", ["ddmin", "minesweeper", "hybrid"])
@@ -79,8 +73,9 @@ def test_gama_known_skeletons(organism):
 
 
 @pytest.mark.skipif(
-    not os.path.isdir(os.path.join(OLD, "knockout_skeleton")),
-    reason="needs ~/2026-11-03/knockout_skeleton",
+    not os.path.isdir(os.path.join(OLD, "knockout_skeleton"))
+    or not os.path.exists(OLD_BINARY),
+    reason="needs ~/2026-11-03/knockout_skeleton and its Avida binary",
 )
 @pytest.mark.parametrize("policy", ["ddmin", "minesweeper", "hybrid"])
 @pytest.mark.parametrize(
@@ -92,7 +87,7 @@ def test_matches_original_on_avida(organism, policy):
     from knockout_skeleton.avida import AvidaExactOracle
 
     oracle = AvidaExactOracle(
-        organism, rel_fitness_tol=0.02, binary_path=BINARY
+        organism, rel_fitness_tol=0.02, binary_path=OLD_BINARY
     )
     ref = asyncio.run(
         skeletonize(

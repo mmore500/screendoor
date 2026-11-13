@@ -1,18 +1,15 @@
-from __future__ import annotations
-
+import datetime
 import typing
 
 from ...auxlib._now_iso import parse_iso
 from ._send import send
 
-if typing.TYPE_CHECKING:
-    import datetime
-
 
 def notify_intermittent(
     *, interval_s: float = 3600
 ) -> typing.Callable[..., list[dict]]:
-    """Send if the last send is older than ``interval_s``; else suppress.
+    """Create a notifier that sends a notification only if the last send is
+    older than `interval_s` seconds, and suppresses it otherwise.
 
     Parameters
     ----------
@@ -21,9 +18,9 @@ def notify_intermittent(
 
     Returns
     -------
-    Callable[..., list]
-        The notifier: ``(ctx, level, message, data, history, now)`` sends
-        ``message``, or suppresses it, and returns its event.
+    Callable[..., list[dict]]
+        Notifier `notify(ctx, level, message, data, history, now)`,
+        returning a `sent`, `send_failed` or `suppressed` event.
     """
 
     def notify(

@@ -1,23 +1,6 @@
-"""The machinery the knockout policies share, ported from
-knockout_skeleton.search (2026-11-03, exact-oracle mode).
-
-A search is a generator. Where the original awaited
-``evaluator.evaluate_many``, it yields ``{"genotypes": [...], "fresh": n}``
-and is sent back ``{genotype: "accept" | "reject"}``, so churn can replay
-it from recorded trial results on every tick: the same seed and verdicts
-give the same trajectory. A genotype is the frozenset of retained sites; a
-mask is a set of sites to delete from the current genotype.
-
-Subclasses give the policy as ``search()``, a generator returning pass,
-unresolved, recovered or exhausted_recovery; ``run()`` then makes the
-sweep: it tries single deletions until none passes, and audits. Each wave
-says whether it is in the ``sweep``, so the verdicts there may follow
-another rule; with ``rejudge_at_sweep``, the search then forgets
-its rejections, to have them judged again.
-"""
-
 import math
 import random
+import typing
 
 from ....auxlib._weighted_subset import weighted_subset
 from ._ProposalMemory import ProposalMemory
@@ -25,27 +8,78 @@ from ._masks import ACCEPT, UNKNOWN, singletons
 
 
 class KnockoutSearch:
+    """Base class of the knockout skeletonization policies, ported from
+    `knockout_skeleton.search` (2026-11-03, exact-oracle mode).
+
+    A search is a generator. Where the original awaited
+    `evaluator.evaluate_many`, it yields a wave `{"genotypes": [...],
+    "fresh": n, "sweep": bool}` and is sent back `{genotype: "accept" |
+    "reject"}`, so that churn can replay it from recorded trial results on
+    every tick: the same seed and verdicts give the same trajectory. A
+    genotype is the frozenset of retained sites; a mask is a set of sites
+    to delete from the current genotype.
+
+    Subclasses give their policy as `search()`, a generator returning
+    `pass`, `unresolved`, `recovered` or `exhausted_recovery`; `run()` then
+    makes the sweep, trying single deletions until none passes, and
+    audits. Each wave says whether it is in the sweep, so that verdicts
+    there may follow another rule; with `rejudge_at_sweep`, the search
+    then forgets its rejections, to have them judged again.
+
+    Parameters
+    ----------
+    sites : iterable of int
+        The wildtype's sites.
+    batch_size : int
+        Genotypes per wave.
+    seed : int
+        Seed of the search's own random number generator.
+    combination_rounds : int, default 2
+        Rounds of union proposals after accepted masks.
+    exact : bool, default True
+        Exact-oracle mode, as in the original.
+    final_audit : bool, default True
+        Whether to re-test the skeleton afresh before certifying it.
+    audit_every : int, default 0
+        Also audit after every this many commits; 0 never does.
+    max_rollbacks : int, default 2
+        Failed audits tolerated before giving up.
+    max_proposal_batches : int or None, default None
+        Stop, uncertified, after this many proposal batches.
+    initial_knockout_size : int or None, default None
+        Sites per initial ddmin chunk; None halves the genome.
+    context_decay : float, default 4.0
+        The proposal memory's `context_decay`.
+    memory_strength : float, default 4.0
+        The proposal memory's `strength`.
+    rejudge_at_sweep : bool, default False
+        Whether to forget verdicts at the sweep, to have them judged again
+        by its rule.
+    sweep : bool, default True
+        Whether to run the singleton sweep after `search()`.
+    """
+
     policy = ""  # each subclass names its policy
-    policy_kwargs: tuple = ()  # assay_kwargs its __init__ takes besides
+    policy_kwargs: tuple = ()  # the assay_kwargs its __init__ takes besides
 
     def __init__(
         self,
-        sites,
+        sites: typing.Iterable[int],
         *,
         batch_size: int,
-        seed,
+        seed: int,
         combination_rounds: int = 2,
         exact: bool = True,
         final_audit: bool = True,
         audit_every: int = 0,
         max_rollbacks: int = 2,
-        max_proposal_batches=None,
-        initial_knockout_size=None,
+        max_proposal_batches: int | None = None,
+        initial_knockout_size: int | None = None,
         context_decay: float = 4.0,
         memory_strength: float = 4.0,
         rejudge_at_sweep: bool = False,
         sweep: bool = True,
-    ):
+    ) -> None:
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
         self.original = self.current = frozenset(sites)
@@ -75,10 +109,34 @@ class KnockoutSearch:
         self.sweep = sweep
         self.stats: dict = {}  # a policy's own figures, for the summary
 
-    # -- evaluation ------------------------------------------------------
-    def evaluate(self, candidates, *, stop_after_accept=False, fresh=False):
-        """Generator: verdicts for genotypes, as in
-        ``ExactEvaluator.evaluate_many``. ``fresh`` bypasses the cache."""
+    def evaluate(
+        self,
+        candidates: typing.Iterable[frozenset[int]],
+        *,
+        stop_after_accept: bool = False,
+        fresh: bool = False,
+    ) -> typing.Generator[dict, dict, dict]:
+        """Get verdicts on genotypes, as `ExactEvaluator.evaluate_many`
+        did.
+
+        Cached verdicts are reused unless `fresh`; the rest are asked for
+        in waves of `batch_size`.
+
+        Parameters
+        ----------
+        candidates : iterable of frozenset of int
+            The genotypes to judge.
+        stop_after_accept : bool, default False
+            Whether to stop once a wave accepts a genotype.
+        fresh : bool, default False
+            Whether to bypass the cache, asking for new trials.
+
+        Returns
+        -------
+        Generator[dict, dict, dict]
+            Yields waves and is sent their verdicts; returns `{genotype:
+            verdict}`, with `UNKNOWN` for genotypes not asked about.
+        """
         candidates = list(dict.fromkeys(candidates))
         result, pending = {}, []
         for s in candidates:
@@ -106,10 +164,38 @@ class KnockoutSearch:
                 break
         return result
 
-    def test(self, masks, kind, *, stop_after_accept=False, remember=True):
-        """Generator: verdicts for deleting each mask from the current
-        genotype, as one proposal batch. They feed the proposal memory
-        unless ``remember`` is false."""
+    def test(
+        self,
+        masks: typing.Iterable[frozenset[int]],
+        kind: str,
+        *,
+        stop_after_accept: bool = False,
+        remember: bool = True,
+    ) -> typing.Generator[dict, dict, dict]:
+        """Get verdicts on deleting each mask from the current genotype, as
+        one proposal batch.
+
+        The verdicts feed the proposal memory unless `remember` is False.
+        Once `max_proposal_batches` is spent, the search is stopped and
+        every mask is `UNKNOWN`.
+
+        Parameters
+        ----------
+        masks : iterable of frozenset of int
+            Nonempty subsets of the current genotype.
+        kind : str
+            The phase, set as `phase`.
+        stop_after_accept : bool, default False
+            Whether to stop once a wave accepts a genotype.
+        remember : bool, default True
+            Whether the verdicts feed the proposal memory.
+
+        Returns
+        -------
+        Generator[dict, dict, dict]
+            Yields waves and is sent their verdicts; returns `{mask:
+            verdict}`.
+        """
         masks = list(dict.fromkeys(masks))
         if not masks:
             return {}
@@ -131,9 +217,34 @@ class KnockoutSearch:
                 self.memory.observe(parent, d, v)
         return result
 
-    def test_all(self, masks, kind, *, until=None, remember=True):
-        """Generator: test ``masks`` batch by batch, ending early if the
-        search stops or the mask ``until`` is accepted."""
+    def test_all(
+        self,
+        masks: list[frozenset[int]],
+        kind: str,
+        *,
+        until: frozenset[int] | None = None,
+        remember: bool = True,
+    ) -> typing.Generator[dict, dict, dict]:
+        """Test `masks` batch by batch, stopping early if the search stops
+        or the mask `until` is accepted.
+
+        Parameters
+        ----------
+        masks : list of frozenset of int
+            Nonempty subsets of the current genotype.
+        kind : str
+            The phase, set as `phase`.
+        until : frozenset of int or None, default None
+            A mask whose acceptance ends the testing.
+        remember : bool, default True
+            Whether the verdicts feed the proposal memory.
+
+        Returns
+        -------
+        Generator[dict, dict, dict]
+            Yields waves and is sent their verdicts; returns `{mask:
+            verdict}` for the masks tested.
+        """
         outcomes: dict = {}
         for start in range(0, len(masks), self.b):
             batch = masks[start : start + self.b]
@@ -144,8 +255,11 @@ class KnockoutSearch:
                 break
         return outcomes
 
-    def untried(self, masks, min_size: int = 2) -> list:
-        """Masks of at least ``min_size`` not yet rejected here."""
+    def untried(
+        self, masks: typing.Iterable[frozenset[int]], min_size: int = 2
+    ) -> list[frozenset[int]]:
+        """Filter `masks` to those of at least `min_size` sites not yet
+        rejected from the current genotype."""
         return [
             d
             for d in masks
@@ -153,16 +267,30 @@ class KnockoutSearch:
             and not self.memory.rejected_here(self.current, d)
         ]
 
-    # -- combination -----------------------------------------------------
-    def _best(self, masks):
-        """A largest mask, ties broken at random."""
+    def _best(self, masks: typing.Iterable[frozenset[int]]) -> frozenset[int]:
+        """Pick a largest mask, breaking ties at random."""
         masks = list(masks)
         size = max(map(len, masks))
         largest = [d for d in masks if len(d) == size]
         return self.rng.choice(sorted(largest, key=lambda d: tuple(sorted(d))))
 
-    def combination_masks(self, accepted: set, attempted: set) -> list:
-        """Propose unions of accepted masks larger than the best one."""
+    def combination_masks(
+        self, accepted: set, attempted: set
+    ) -> list[frozenset[int]]:
+        """Propose unions of accepted masks larger than the best one.
+
+        Parameters
+        ----------
+        accepted : set of frozenset of int
+            The masks accepted so far.
+        attempted : set of frozenset of int
+            The masks already proposed, not to propose again.
+
+        Returns
+        -------
+        list of frozenset of int
+            At most `batch_size` proposals.
+        """
         best = self._best(accepted)
         donors = sorted(
             accepted, key=lambda d: (len(d), tuple(sorted(d))), reverse=True
@@ -170,7 +298,7 @@ class KnockoutSearch:
         donors = list(dict.fromkeys(donors + self.memory.donors(self.current)))
         proposals, seen = [], set(attempted)
 
-        def add(d):
+        def add(d: typing.Iterable[int]) -> None:
             d = frozenset(d)
             if (
                 len(d) > len(best)
@@ -202,9 +330,23 @@ class KnockoutSearch:
                 add(weighted_subset(pool, k, weights, self.rng))
         return proposals[: self.b]
 
-    def combine(self, outcomes: dict):
-        """Generator: the best mask among the accepted ones and their
-        accepted unions."""
+    def combine(
+        self, outcomes: dict
+    ) -> typing.Generator[dict, dict, frozenset[int]]:
+        """Find the best mask among the accepted ones and their accepted
+        unions, over `combination_rounds` rounds of proposals.
+
+        Parameters
+        ----------
+        outcomes : dict of {frozenset of int: str}
+            The verdict on each mask of a proposal batch, at least one of
+            them `ACCEPT`.
+
+        Returns
+        -------
+        Generator[dict, dict, frozenset of int]
+            Yields waves and is sent their verdicts; returns the best mask.
+        """
         accepted = {d for d, v in outcomes.items() if v == ACCEPT}
         if not accepted:
             raise AssertionError("combination requires an accepted fallback")
@@ -218,7 +360,9 @@ class KnockoutSearch:
             accepted.update(d for d, v in results.items() if v == ACCEPT)
         return self._best(accepted)
 
-    def commit(self, mask, reason: str) -> None:
+    def commit(self, mask: frozenset[int], reason: str) -> None:
+        """Delete `mask` from the current genotype, recording the
+        transition and a checkpoint."""
         old = self.current
         self.current = old - mask
         if not self.current < old:
@@ -227,11 +371,15 @@ class KnockoutSearch:
         self.checkpoints.append(self.current)
         self.commits_since_audit += 1
 
-    def audit(self):
-        """Generator: re-evaluate the current genotype afresh, rolling back
-        to the newest checkpoint that still passes if it fails.
+    def audit(self) -> typing.Generator[dict, dict, str]:
+        """Re-evaluate the current genotype afresh and, if it fails, roll
+        back to the newest checkpoint that still passes.
 
-        Returns pass, unresolved, recovered or exhausted_recovery.
+        Returns
+        -------
+        Generator[dict, dict, str]
+            Yields waves and is sent their verdicts; returns `pass`,
+            `unresolved`, `recovered` or `exhausted_recovery`.
         """
         target = self.current
         self.phase = "audit"
@@ -258,14 +406,43 @@ class KnockoutSearch:
             return "exhausted_recovery"
         return "recovered"
 
-    def after_commit(self):
+    def after_commit(self) -> typing.Generator[dict, dict, str]:
+        """Audit if `audit_every` commits have gone unaudited; else pass.
+
+        Returns
+        -------
+        Generator[dict, dict, str]
+            Yields waves and is sent their verdicts; returns the audit's
+            status, or `pass` without one.
+        """
         if self.audit_every and self.commits_since_audit >= self.audit_every:
             return (yield from self.audit())
         return "pass"
 
-    def take(self, outcomes: dict, reason: str, full=None):
-        """Generator: commit ``full`` if it was accepted, else the best
-        combination of the accepted masks. Returns (mask, audit status)."""
+    def take(
+        self,
+        outcomes: dict,
+        reason: str,
+        full: frozenset[int] | None = None,
+    ) -> typing.Generator[dict, dict, tuple[frozenset[int], str]]:
+        """Commit `full` if it was accepted, else the best combination of
+        the accepted masks; then audit as `after_commit` does.
+
+        Parameters
+        ----------
+        outcomes : dict of {frozenset of int: str}
+            The verdict on each mask of a proposal batch.
+        reason : str
+            Recorded with the commit's transition.
+        full : frozenset of int or None, default None
+            The mask to prefer if it was accepted.
+
+        Returns
+        -------
+        Generator[dict, dict, tuple]
+            Yields waves and is sent their verdicts; returns the mask
+            committed and the audit's status.
+        """
         if outcomes.get(full) == ACCEPT:
             mask = full
         else:
@@ -274,12 +451,36 @@ class KnockoutSearch:
         return mask, (yield from self.after_commit())
 
     def initial_chunks(self) -> int:
+        """Return how many chunks ddmin starts from: 2, or enough for
+        chunks of `initial_knockout_size` sites."""
         size = self.initial_knockout_size
         if size is None:
             return 2
         return max(2, math.ceil(len(self.current) / size))
 
-    def result(self, certified: bool, reason: str, unresolved=()) -> dict:
+    def result(
+        self,
+        certified: bool,
+        reason: str,
+        unresolved: typing.Iterable[int] = (),
+    ) -> dict:
+        """Build the search's result.
+
+        Parameters
+        ----------
+        certified : bool
+            Whether the skeleton is certified single-deletion minimal.
+        reason : str
+            The search's `status`.
+        unresolved : iterable of int, default ()
+            Sites whose single deletions went unresolved.
+
+        Returns
+        -------
+        dict
+            `retained`, `certified`, `status`, `proposal_batches`,
+            `rollbacks`, `transitions` and `unresolved`.
+        """
         return {
             "retained": self.current,
             "certified": certified,
@@ -290,10 +491,15 @@ class KnockoutSearch:
             "unresolved": sorted(unresolved),
         }
 
-    def run(self):
-        """Generator: run ``search()``, then (unless ``sweep`` is false)
-        singleton sweeps until no single deletion passes, and the final
-        audit. Returns the result dict (``StopIteration.value``).
+    def run(self) -> typing.Generator[dict, dict, dict]:
+        """Run `search()`, then, unless `sweep` is False, singleton sweeps
+        until no single deletion passes, and the final audit.
+
+        Returns
+        -------
+        Generator[dict, dict, dict]
+            Yields waves and is sent their verdicts; returns the result, as
+            `result` builds it.
         """
         status = yield from self.search()
         if status in ("unresolved", "exhausted_recovery"):

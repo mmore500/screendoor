@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import contextlib
 import os
 import signal
@@ -9,13 +7,14 @@ from ._procs import live_pid, pidfile
 
 
 def kill() -> typing.Callable[[dict, list[dict]], None]:
-    """Send SIGTERM to the process group of each trial's batch.
+    """Create a `how_kill` hook that sends SIGTERM to the process group of
+    each trial's batch.
 
     Returns
     -------
-    Callable[[dict, list], None]
-        The ``how_kill`` hook: ``(ctx, trials)`` signals each running
-        batch the trials belong to.
+    Callable[[dict, list[dict]], None]
+        Hook `kill(ctx, trials)`, which signals each running batch the
+        trials belong to.
     """
 
     def kill(ctx: dict, trials: list[dict]) -> None:

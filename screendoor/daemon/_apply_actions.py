@@ -1,51 +1,51 @@
-from __future__ import annotations
-
 import logging
 import typing
 
+from ..auxlib._DispatchContext import DispatchContext
 from ..auxlib._make_trial_uuid import make_trial_uuid
 from ..auxlib._tally_trials import tally_trials
 from ..churn._ORDER import ORDER
 from ._notify import notify
 from ._submit_trials import submit_trials
 
-if typing.TYPE_CHECKING:
-    from ..auxlib._DispatchContext import DispatchContext
-
 
 def churn_step(memo: list[typing.Any], trial_submissions: list[dict]) -> str:
-    """Which churn call this is: ``"<memos>:<trial submissions>"`` seen.
+    """Name the churn call that sees `memo` and `trial_submissions`, as
+    `"<memos>:<trial submissions>"`.
+
+    Trial submissions and memos record the step of the call that made
+    them, which is how `replay_dispatch` finds that call.
 
     Parameters
     ----------
     memo : list
-        The memo payloads churn saw.
+        The memo payloads churn sees.
     trial_submissions : list of dict
-        The trial submissions churn saw.
+        The trial submissions churn sees.
 
     Returns
     -------
     str
-        The two counts, as ``"<memos>:<trial submissions>"``.
+        The step.
     """
     return f"{len(memo)}:{len(trial_submissions)}"
 
 
 def complete(ctx: DispatchContext, outcome: str, **fields: typing.Any) -> None:
-    """Record the dispatch completed, with a tally of its trials so far, then
-    call how_cleanup_success or how_cleanup_failure.
+    """Record that the dispatch completed, with a tally of its trials, then
+    run its cleanup hook.
 
-    A cleanup that raises is logged and recorded as ``cleanup_error``; the
-    dispatch stays completed.
+    A cleanup hook that raises is logged and recorded as a `cleanup_error`
+    event; the dispatch stays completed.
 
     Parameters
     ----------
     ctx : DispatchContext
         The dispatch completing.
     outcome : str
-        ``succeeded`` or ``failed``.
+        `succeeded` or `failed`.
     **fields
-        Recorded with the outcome: ``summary`` or ``reason``.
+        Recorded with the outcome: `summary` or `reason`.
     """
     trials = ctx.read_trials()
     ctx.completed = {
@@ -53,9 +53,7 @@ def complete(ctx: DispatchContext, outcome: str, **fields: typing.Any) -> None:
         **fields,
         "tally": tally_trials(trials),
     }
-    ctx.write_dispatch_payload(
-        {"event": "completed", **ctx.completed},
-    )
+    ctx.write_dispatch_payload({"event": "completed", **ctx.completed})
     which = "success" if outcome == "succeeded" else "failure"
     try:
         ctx.call_hook(f"how_cleanup_{which}", ctx.completed)
@@ -67,8 +65,8 @@ def complete(ctx: DispatchContext, outcome: str, **fields: typing.Any) -> None:
 
 
 def check_actions(actions: typing.Any) -> list[dict]:
-    """Churn's actions in the order they apply; raise if they are not a
-    list of actions.
+    """Check that churn returned a list of actions, and sort them into the
+    order they apply.
 
     Parameters
     ----------
@@ -78,14 +76,14 @@ def check_actions(actions: typing.Any) -> list[dict]:
     Returns
     -------
     list of dict
-        The actions, sorted by ORDER.
+        The actions, sorted by `ORDER`.
 
     Raises
     ------
     TypeError
-        If ``actions`` is not a list.
+        If `actions` is not a list.
     ValueError
-        If an item is not a dict whose ``action`` is in ORDER.
+        If an item is not a dict whose `action` is in `ORDER`.
     """
     if not isinstance(actions, list):
         raise TypeError(f"churn must return a list, got {type(actions)}")
@@ -98,9 +96,11 @@ def check_actions(actions: typing.Any) -> list[dict]:
 def plan_actions(
     ctx: DispatchContext, actions: list[dict], trials: list[dict]
 ) -> tuple[dict[str, dict], list[typing.Any]]:
-    """``(requests, memos)``: the new trials to submit, ``{trial_uuid:
-    trial}`` in request order, and the memo payloads. A request for a
-    trial that exists, or is asked for twice, is dropped.
+    """Work out the trials to submit and the memos to record from churn's
+    actions.
+
+    A request for a trial that already exists, or that is asked for twice,
+    is dropped with a warning.
 
     Parameters
     ----------
@@ -113,8 +113,8 @@ def plan_actions(
 
     Returns
     -------
-    requests : dict of str to dict
-        The requested trials, by trial_uuid.
+    requests : dict of {str: dict}
+        The requested trials by `trial_uuid`, in request order.
     memos : list
         The memo payloads.
     """
@@ -141,12 +141,7 @@ def apply_actions(
     memo: list[typing.Any],
     step: str,
 ) -> bool:
-    """Carry out churn's checked actions; return whether a memo was
-    written.
-
-    ``trials`` are the folded trials churn saw. Trial submissions and
-    memos record ``step``, the churn_step of the call, which is how
-    replay_dispatch finds the call that made them.
+    """Carry out churn's checked actions.
 
     Parameters
     ----------
@@ -159,12 +154,13 @@ def apply_actions(
     memo : list
         The memo payloads churn saw.
     step : str
-        The churn_step of the call.
+        The `churn_step` of the call.
 
     Returns
     -------
     bool
-        Whether a memo was written.
+        Whether a memo was written, in which case churn runs again this
+        tick.
     """
     requests, memos = plan_actions(ctx, actions, trials)
     # task ids count trials in request order: 0, 1, 2, ...

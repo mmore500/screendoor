@@ -2,7 +2,8 @@ import json
 
 
 def canonical_json(obj: object) -> str:
-    """Serialize ``obj`` deterministically: sorted keys, no whitespace.
+    """Serialize `obj` to compact JSON with sorted keys, so that equal
+    values always serialize the same.
 
     Parameters
     ----------
@@ -12,14 +13,14 @@ def canonical_json(obj: object) -> str:
     Returns
     -------
     str
-        The compact JSON text, the same for equal values.
+        The JSON text, without whitespace.
 
     Raises
     ------
     TypeError
-        If ``obj`` holds a value JSON cannot represent.
+        If `obj` holds a value JSON cannot represent.
     ValueError
-        If ``obj`` holds NaN or infinity.
+        If `obj` holds NaN or infinity.
     """
     return json.dumps(
         obj,

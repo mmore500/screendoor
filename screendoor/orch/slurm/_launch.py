@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 import shlex
 import typing
@@ -15,19 +13,20 @@ def launch(
     script_dir: str = "~/slurmscripts",
     log_dir: str = "~/slurmlogs",
 ) -> typing.Callable[[dict, str, list[list[dict]]], None]:
-    """Submit one job's batches as one ``sbatch --array`` named for it.
+    """Create a `how_launch` hook that submits each job's batches as one
+    `sbatch --array` named for the job.
 
-    Array task i runs batch i, so a trial's job is its recorded name and
-    index. ``sbatch_flags`` pass to sbatch verbatim, overriding the
-    script's own ``#SBATCH`` lines. ``worker`` is the command that starts
-    the worker on the compute node, where this interpreter may not exist.
+    Array task `i` runs batch `i`, so a trial's job is its recorded name
+    and index.
 
     Parameters
     ----------
     sbatch_flags : str or list of str, default ""
-        Extra sbatch flags; a string is split as the shell would.
+        Extra flags passed to `sbatch` verbatim, overriding the script's
+        own `#SBATCH` lines; a string is split as the shell would.
     worker : str, default "python3 -m screendoor.trial.worker"
-        The command that starts the worker.
+        The command that starts the worker on the compute node, where this
+        interpreter may not exist.
     script_dir : str, default "~/slurmscripts"
         Where each job keeps a copy of its script.
     log_dir : str, default "~/slurmlogs"
@@ -35,10 +34,9 @@ def launch(
 
     Returns
     -------
-    Callable[[dict, str, list], None]
-        The ``how_launch`` hook: ``(ctx, name, batches)`` writes the job's
-        script to ``jobs/<name>.sbatch`` in the run directory and submits
-        it.
+    Callable[[dict, str, list[list[dict]]], None]
+        Hook `launch(ctx, name, batches)`, which writes the job's script to
+        `jobs/<name>.sbatch` in the run directory and submits it.
     """
     if isinstance(sbatch_flags, str):
         sbatch_flags = shlex.split(sbatch_flags)

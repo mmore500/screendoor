@@ -1,10 +1,12 @@
 def decode_sites(text: str) -> frozenset[int]:
-    """Inverse of encode_sites: "0-2,5,9" -> ``{0, 1, 2, 5, 9}``.
+    """Parse a set of sites from the range notation of `encode_sites`.
+
+    For example, `"0-2,5,9"` decodes to `{0, 1, 2, 5, 9}`.
 
     Parameters
     ----------
     text : str
-        Comma-separated integers and inclusive ``a-b`` ranges.
+        Comma-separated integers and inclusive `a-b` ranges.
 
     Returns
     -------

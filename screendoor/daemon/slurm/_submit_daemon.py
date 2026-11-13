@@ -23,28 +23,26 @@ def submit_daemon(
     log_dir: str = "~/slurmlogs",
     successor: bool = False,
 ) -> str | None:
-    """Queue a daemon job for ``dispatchdir``; return its job id.
+    """Queue a daemon job for `dispatchdir`.
 
-    Run this after submitting or resuming a dispatch: neither starts a
-    daemon.
+    Run this after submitting or resuming a dispatch; neither starts a
+    daemon. The job is timed by `--begin`, the earliest time an active
+    dispatch is due. A `successor`, queued by a daemon job before it ticks,
+    begins when a dispatch is next due after that tick. Daemon jobs do not
+    wait on each other: one that starts while another is ticking finds the
+    dispatchdir's lock held, skips its tick, and still queues its
+    successor.
 
-    The job is timed by ``--begin``: the earliest time an active dispatch
-    is due. A ``successor``, queued by a daemon job before it ticks, begins
-    when a dispatch is next due after that tick. Daemon jobs do not wait
-    on each other; one that starts while another is ticking finds the
-    dispatchdir lock held, skips its tick, and still queues its successor.
-
-    Returns None, queueing nothing, when no dispatch is active or (unless
-    ``successor``) a daemon job is already queued; that job is pulled
-    forward instead.
+    Nothing is queued when no dispatch is active, or (unless `successor`)
+    when a daemon job is already pending, which is pulled forward instead.
 
     Parameters
     ----------
     dispatchdir : str
-        The dispatchdir to run a daemon for.
+        Path of the dispatchdir to run a daemon for.
     python : str or None, default None
-        The command that runs python with screendoor importable; None for
-        default_python_command.
+        The command that runs python with screendoor importable; None uses
+        `default_python_command`.
     sbatch_flags : str, default ""
         Extra sbatch flags, as one shell string.
     script_dir : str, default "~/slurmscripts"
@@ -93,14 +91,15 @@ def submit_daemon(
 
 
 def cancel_chain(dispatchdir: str) -> None:
-    """Cancel the queued daemon job if no dispatch is left active.
+    """Cancel the pending daemon jobs of `dispatchdir` if no dispatch is
+    left active.
 
     A daemon job that is running finishes its tick, which does nothing.
 
     Parameters
     ----------
     dispatchdir : str
-        The daemon's dispatchdir.
+        Path of the daemon's dispatchdir.
     """
     jobs = [jobid for jobid, _ in queued_chain_jobs(dispatchdir)]
     if jobs and earliest_begin(dispatchdir) is None:

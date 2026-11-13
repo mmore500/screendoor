@@ -2,7 +2,7 @@ import typing
 
 
 def accepted(result: typing.Any) -> bool:
-    """Whether a trial result says yes: ``true`` or ``{"accept": true}``.
+    """Does a trial result say yes, as `true` or `{"accept": true}`?
 
     The built-in assays read pass/fail results this way.
 

@@ -1,22 +1,26 @@
-from __future__ import annotations
-
 import typing
 
-from ...auxlib._read_jsonl_tolerant import read_jsonl_tolerant
-from ._files import path
+from ._files import read_hook
 
 
-def read_churn_notify() -> typing.Callable[[dict], list[dict]]:
-    """Read every event in churn_notify.jsonl.
+def read_churn_notify(
+    *, lock: bool = False, timeout: float | None = None
+) -> typing.Callable[[dict], list[dict]]:
+    """Create a `how_read_churn_notify` hook that reads the run directory's
+    `churn_notify.jsonl`.
+
+    Parameters
+    ----------
+    lock : bool, default False
+        Whether to read under a shared fcntl lock, for filesystems where
+        `O_APPEND` writes can tear (NFS across nodes).
+    timeout : float or None, default None
+        Seconds to wait for the lock before raising `LockTimeoutError`;
+        None waits as long as it takes.
 
     Returns
     -------
     Callable[[dict], list[dict]]
-        The ``how_read_churn_notify`` hook: ``(ctx)`` returns the file's
-        events.
+        Hook `read_churn_notify(ctx)`, returning the file's records.
     """
-
-    def read_churn_notify(ctx: dict) -> list[dict]:
-        return read_jsonl_tolerant(path(ctx, "churn_notify"))
-
-    return read_churn_notify
+    return read_hook("churn_notify", lock=lock, timeout=timeout)

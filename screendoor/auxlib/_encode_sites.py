@@ -2,8 +2,9 @@ import typing
 
 
 def encode_sites(sites: typing.Iterable[int]) -> str:
-    """Sorted integers as compact ranges, e.g. ``{0, 1, 2, 5, 9}`` ->
-    "0-2,5,9".
+    """Format a set of sites compactly, with runs as inclusive ranges.
+
+    For example, `{0, 1, 2, 5, 9}` encodes to `"0-2,5,9"`.
 
     Parameters
     ----------
@@ -13,7 +14,7 @@ def encode_sites(sites: typing.Iterable[int]) -> str:
     Returns
     -------
     str
-        Comma-separated integers, runs as inclusive ``a-b`` ranges.
+        Comma-separated integers and `a-b` ranges, ascending.
     """
     runs: list = []
     for i in sorted(sites):

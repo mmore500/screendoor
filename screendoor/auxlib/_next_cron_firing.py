@@ -34,19 +34,19 @@ def parse_cron(
     Parameters
     ----------
     expr : str
-        Minute, hour, day of month, month and day of week.
+        Minute, hour, day of month, month and day of week fields.
 
     Returns
     -------
     tuple
-        ``(minute, hour, dom, month, dow, dom_star, dow_star)``: the values
-        each field allows (Sunday is day 0), and whether day of month and
-        day of week are ``*``.
+        `(minute, hour, dom, month, dow, dom_star, dow_star)`: the values
+        each field allows, with Sunday as day 0, and whether the day of
+        month and day of week fields are `*`.
 
     Raises
     ------
     ValueError
-        If ``expr`` is not five valid fields.
+        If `expr` is not five valid fields.
     """
     fields = expr.split()
     if len(fields) != 5:
@@ -54,7 +54,7 @@ def parse_cron(
     minute, hour, dom, month, dow = (
         _parse_field(f, lo, hi) for f, (lo, hi) in zip(fields, _RANGES)
     )
-    dow = {d % 7 for d in dow}  # 7 == Sunday
+    dow = {d % 7 for d in dow}  # 7 is also Sunday
     return minute, hour, dom, month, dow, fields[2] == "*", fields[4] == "*"
 
 
@@ -62,27 +62,28 @@ def next_cron_firing(
     expr: str,
     after: datetime.datetime,
 ) -> datetime.datetime:
-    """First firing of five-field cron ``expr`` strictly after ``after``.
+    """Find the first firing of the cron expression `expr` strictly after
+    `after`.
 
-    Supports lists, ranges and steps. As in Vixie cron, when both day of
-    month and day of week are restricted, either may match.
+    Lists, ranges and steps are supported. As in Vixie cron, when both the
+    day of month and day of week fields are restricted, either may match.
 
     Parameters
     ----------
     expr : str
-        Minute, hour, day of month, month and day of week.
+        A five-field cron expression.
     after : datetime.datetime
         The time to search from.
 
     Returns
     -------
     datetime.datetime
-        The firing, in ``after``'s timezone.
+        The firing, in the timezone of `after`.
 
     Raises
     ------
     ValueError
-        If ``expr`` is invalid or never fires.
+        If `expr` is invalid or never fires.
     """
     minute, hour, dom, month, dow, dom_star, dow_star = parse_cron(expr)
     tz = after.tzinfo

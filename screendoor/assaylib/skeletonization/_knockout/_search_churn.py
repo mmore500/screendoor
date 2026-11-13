@@ -1,26 +1,12 @@
-"""Replay a KnockoutSearch as a pure churn function.
-
-Every tick replays the search from the start, feeding it verdicts computed
-from recorded trials, until it asks about a genotype whose trials are not
-all in. Churn launches the missing ones and returns. Nothing is memoized:
-the trial records are the state.
-
-Each phase has a rule: ``search_rule`` while the policy searches, and
-``sweep_rule`` in the sweep and final audit after it (None: no sweep).
-Either is ``detectable_loss`` (reject only a detectable loss) or
-``noninferiority`` (accept only a loss shown to be within the margin).
-If either is ``noninferiority``, a genotype's verdict comes in two
-stages: its replicate 0 screens it, rejecting a detectable loss, and
-replicates 1 to ``replicates`` then confirm it by its phase's rule.
-"""
-
 from collections import Counter
 import math
 from statistics import NormalDist
+import typing
 
 from .... import churn as scd_churn
-from ....auxlib import canonical_json
+from ....auxlib._canonical_json import canonical_json
 from ....auxlib._encode_sites import encode_sites
+from ._KnockoutSearch import KnockoutSearch
 from ._controls import RULES, Controls, t_quantile
 from ._masks import ACCEPT, REJECT
 
@@ -37,20 +23,21 @@ SEARCH_KWARGS = (
 )
 
 
-def _trial_key(g: frozenset, rep: int, fresh: int) -> dict:
+def _trial_key(g: frozenset[int], rep: int, fresh: int) -> dict:
     key = {"retained": encode_sites(g), "replicate": rep}
     if fresh:
         key["fresh"] = fresh
     return key
 
 
-def _masked_sequence(kw: dict, g: frozenset) -> str:
+def _masked_sequence(kw: dict, g: frozenset[int]) -> str:
     nop = kw.get("nop_symbol", "A")
     return "".join(s if i in g else nop for i, s in enumerate(kw["sequence"]))
 
 
-def _trial_env(kw: dict, n: int, g: frozenset, rep: int) -> dict:
-    """The user's ``env``, then the assay's variables, which win."""
+def _trial_env(kw: dict, n: int, g: frozenset[int], rep: int) -> dict:
+    """Build a trial's environment: the user's `env`, then the assay's own
+    variables, which win."""
     env = {
         **kw.get("env", {}),
         "retained": encode_sites(g),
@@ -64,7 +51,7 @@ def _trial_env(kw: dict, n: int, g: frozenset, rep: int) -> dict:
     return env
 
 
-def _as_dict(result) -> dict:
+def _as_dict(result: typing.Any) -> dict:
     if isinstance(result, bool):
         return {"accept": result}
     if isinstance(result, (int, float)):
@@ -77,11 +64,19 @@ def _as_dict(result) -> dict:
 
 
 def _verdict(
-    kw: dict, results: list, baseline: list, judge, *, scores_only=False
+    kw: dict,
+    results: list,
+    baseline: list,
+    judge: typing.Callable[[list[float]], bool],
+    *,
+    scores_only: bool = False,
 ) -> str:
     """Accept or reject a genotype from its replicates' results, given the
-    wildtype controls' (``baseline``). ``judge(scores)`` judges the
-    replicates' scores; ``scores_only`` refuses ``accept`` results."""
+    wildtype controls' results, `baseline`.
+
+    `judge(scores)` judges the replicates' scores; `scores_only` refuses
+    `accept` results.
+    """
     rs = [_as_dict(r) for r in results]
     baseline = [_as_dict(b) for b in baseline]
     if scores_only and any("accept" in r for r in rs):
@@ -111,7 +106,15 @@ def _verdict(
     return ACCEPT if judge([float(r["score"]) for r in rs]) else REJECT
 
 
-def _summary(kw, search, result, n, trials, waves, control) -> dict:
+def _summary(
+    kw: dict,
+    search: KnockoutSearch,
+    result: dict,
+    n: int,
+    trials: list[dict],
+    waves: int,
+    control: dict,
+) -> dict:
     retained = result["retained"]
     summary = {
         "policy": search.policy,
@@ -145,28 +148,11 @@ def _summary(kw, search, result, n, trials, waves, control) -> dict:
     return summary
 
 
-def make_search_churn(search_class, *, num_control_trials: int):
-    """A churn function for ``search_class`` (a KnockoutSearch) whose
-    wildtype runs ``num_control_trials`` times, as the controls every
-    genotype's scores are judged against."""
-    if int(num_control_trials) < 1:
-        raise ValueError("num_control_trials must be positive")
-
-    def churn(dispatch, trial_submissions, trial_payloads, memo):
-        return search_churn(
-            search_class,
-            dispatch,
-            trial_submissions,
-            trial_payloads,
-            num_control_trials=int(num_control_trials),
-        )
-
-    return churn
-
-
-def _pass_rate(c, rule: str, alpha: float, replicates: int):
-    """For ``t``: the chance a harmless deletion (scoring like the
-    controls) passes ``rule``; None for ``rank``."""
+def _pass_rate(
+    c: Controls, rule: str, alpha: float, replicates: int
+) -> float | None:
+    """Estimate the chance that a harmless deletion, scoring like the
+    controls, passes `rule` under the `t` test; None under `rank`."""
     if c.flat:
         return 1.0
     if c.test != "t":
@@ -176,8 +162,11 @@ def _pass_rate(c, rule: str, alpha: float, replicates: int):
     return NormalDist().cdf(c.margin / c.se(replicates) + sign * q)
 
 
-def _control_summary(c, kw, reps, rules: dict, tally: Counter) -> dict:
-    """The controls, and each stage's rule, alpha and threshold."""
+def _control_summary(
+    c: Controls, reps: int, rules: dict, tally: Counter
+) -> dict:
+    """Summarize the controls and each stage's rule, alpha and
+    threshold."""
     info = c.summary()
     if not rules["sequential"]:
         alpha = rules["alpha"]
@@ -211,17 +200,97 @@ def _control_summary(c, kw, reps, rules: dict, tally: Counter) -> dict:
     return info
 
 
+def make_search_churn(
+    search_class: type[KnockoutSearch], *, num_control_trials: int
+) -> typing.Callable[[dict, list[dict], list[dict], list], list[dict]]:
+    """Create a churn function that replays `search_class` as `search_churn`
+    does.
+
+    Parameters
+    ----------
+    search_class : type
+        A `KnockoutSearch` subclass.
+    num_control_trials : int
+        How many times the wildtype runs, as the controls every genotype's
+        scores are judged against.
+
+    Returns
+    -------
+    Callable[[dict, list[dict], list[dict], list], list[dict]]
+        The churn function, `churn(dispatch, trial_submissions,
+        trial_payloads, memo)`.
+
+    Raises
+    ------
+    ValueError
+        If `num_control_trials` is not positive.
+    """
+    if int(num_control_trials) < 1:
+        raise ValueError("num_control_trials must be positive")
+
+    def churn(
+        dispatch: dict,
+        trial_submissions: list[dict],
+        trial_payloads: list[dict],
+        memo: list,
+    ) -> list[dict]:
+        return search_churn(
+            search_class,
+            dispatch,
+            trial_submissions,
+            trial_payloads,
+            num_control_trials=int(num_control_trials),
+        )
+
+    return churn
+
+
 def search_churn(
-    search_class,
-    dispatch,
-    trial_submissions,
-    trial_payloads,
+    search_class: type[KnockoutSearch],
+    dispatch: dict,
+    trial_submissions: list[dict],
+    trial_payloads: list[dict],
     *,
     num_control_trials: int,
-):
-    """What churn should do next, by replaying ``search_class`` (a
-    KnockoutSearch) over the recorded trials: launch the next wave's
-    missing trials, or succeed with the search's result."""
+) -> list[dict]:
+    """Decide what churn should do next by replaying `search_class` over
+    the recorded trials.
+
+    Every tick replays the search from the start, feeding it verdicts
+    computed from recorded trials, until it asks about a genotype whose
+    trials are not all in. Churn then launches the missing trials and
+    returns; once the search ends, churn succeeds with its result. Nothing
+    is memoized: the trial records are the state.
+
+    Each phase has a rule: `search_rule` while the policy searches, and
+    `sweep_rule` in the sweep and the final audit after it (None for no
+    sweep). Either is `detectable_loss` (reject only a detectable loss) or
+    `noninferiority` (accept only a loss shown to be within the margin). If
+    either is `noninferiority`, a genotype's verdict comes in two stages:
+    its replicate 0 screens it, rejecting a detectable loss, and replicates
+    1 to `replicates` then confirm it by its phase's rule.
+
+    See docs/skeletonization.md for the assay kwargs.
+
+    Parameters
+    ----------
+    search_class : type
+        A `KnockoutSearch` subclass.
+    dispatch : dict
+        The dispatch record, with `assay_kwargs`.
+    trial_submissions : list of dict
+        The dispatch's trial submissions.
+    trial_payloads : list of dict
+        The dispatch's trial payloads.
+    num_control_trials : int
+        How many times the wildtype runs, as the controls every genotype's
+        scores are judged against.
+
+    Returns
+    -------
+    list of dict
+        This step's actions.
+    """
     trials = scd_churn.fold_trials(trial_submissions, trial_payloads)
     kw = dispatch["assay_kwargs"]
     n = len(kw["sequence"]) if "sequence" in kw else int(kw["n_sites"])
@@ -264,9 +333,11 @@ def search_churn(
     by_key = {canonical_json(t["key"]): t for t in trials}
     missing, waiting = {}, 0  # the wave's trials yet to launch, or run
 
-    def need(g, fresh, replicates):
-        """The results of ``g``'s ``replicates``, or None, noting the
-        trials missing or still running."""
+    def need(
+        g: frozenset[int], fresh: int, replicates: typing.Iterable[int]
+    ) -> list | None:
+        """Collect the results of `g`'s `replicates`, noting the trials
+        missing or still running; None until all are in."""
         nonlocal waiting
         found = []
         for rep in replicates:
@@ -286,10 +357,10 @@ def search_churn(
             return None
         return [scd_churn.trial_result(t) for t in found]
 
-    made = []  # the Controls, once a score is first judged
-    tally = Counter()  # screened and confirmed verdicts, by phase
+    made: list[Controls] = []  # the Controls, once a score is first judged
+    tally: Counter = Counter()  # screened and confirmed verdicts, by phase
 
-    def controls(baseline) -> Controls:
+    def controls(baseline: list) -> Controls:
         if not made:
             scores = []
             for r in map(_as_dict, baseline):
@@ -302,16 +373,20 @@ def search_churn(
                     "noninferiority needs a margin: set rel_tol or abs_tol"
                 )
             # refuse settings no candidate could pass, before judging one
-            _control_summary(c, kw, reps, rules, tally)
+            _control_summary(c, reps, rules, tally)
             made.append(c)
         return made[0]
 
-    def judge(baseline, rule: str, alpha: float):
+    def judge(
+        baseline: list, rule: str, alpha: float
+    ) -> typing.Callable[[list[float]], bool]:
         return lambda scores: controls(baseline).accepts(scores, rule, alpha)
 
-    def screen_then_confirm(g, fresh, sweeping, baseline):
-        """Screen ``g`` on replicate 0; if it passes, confirm it on
-        replicates 1 to ``replicates``. None until its trials are in."""
+    def screen_then_confirm(
+        g: frozenset[int], fresh: int, sweeping: bool, baseline: list | None
+    ) -> str | None:
+        """Screen `g` on replicate 0 and, if it passes, confirm it on
+        replicates 1 to `replicates`; None until its trials are in."""
         phase = "sweep" if sweeping else "search"
         first = need(g, fresh, [0])
         if first is None or baseline is None:
@@ -338,9 +413,7 @@ def search_churn(
             wave = run.send(verdicts)
         except StopIteration as stop:
             control = (
-                _control_summary(made[0], kw, reps, rules, tally)
-                if made
-                else {}
+                _control_summary(made[0], reps, rules, tally) if made else {}
             )
             summary = _summary(
                 kw, search, stop.value, n, trials, waves, control

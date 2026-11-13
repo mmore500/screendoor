@@ -1,13 +1,13 @@
-from __future__ import annotations
-
 import typing
 
-from ..auxlib._DispatchContext import NAMES, SEED_NAME, load_dispatches
+from ..auxlib._DispatchContext import (
+    LABEL_NAMES,
+    SEED_NAME,
+    DispatchContext,
+    load_dispatches,
+)
 from ..auxlib._tally_trials import tally_trials
 from ._next_firing import next_firing
-
-if typing.TYPE_CHECKING:
-    from ..auxlib._DispatchContext import DispatchContext
 
 
 def _state(ctx: DispatchContext) -> str:
@@ -17,22 +17,24 @@ def _state(ctx: DispatchContext) -> str:
 
 
 def dispatch_status(dispatchdir: str, *, max_failures: int = 3) -> list[dict]:
-    """One dict per dispatch: its labels and state, trial counts and
-    tally, when it last ticked and is next due, whether it is throttled or
-    churn is raising, and the exit codes of the first ``max_failures``
-    failed trials (None: lost).
+    """Summarize every dispatch in `dispatchdir`, one dict each.
+
+    Each dict carries the dispatch's labels and state, its trial counts and
+    tally, when it last ticked and is next due, whether churn is throttled
+    or raising, and the first `max_failures` failed trials with their exit
+    codes (None for a lost trial).
 
     Parameters
     ----------
     dispatchdir : str
-        The dispatchdir holding the dispatches.
+        Path of the dispatchdir.
     max_failures : int, default 3
         How many failed trials to list per dispatch.
 
     Returns
     -------
     list of dict
-        One row per dispatch, JSON-serializable.
+        One JSON-serializable row per dispatch, in order of submission.
     """
     rows = []
     for ctx in load_dispatches(dispatchdir):
@@ -75,7 +77,7 @@ def _lines(row: dict) -> list[str]:
     tally = ", ".join(f"{k} {row['tally'][k]}" for k in extras)
     meta = ", ".join(
         f"{name.removeprefix('meta_')}={row[name]}"
-        for name in (*NAMES, SEED_NAME)
+        for name in (*LABEL_NAMES, SEED_NAME)
     )
     lines = [
         f"{row['dispatch_uuid'][:8]} {row['state']:9} {row['assay']}",
@@ -116,21 +118,21 @@ def print_status(
     file: typing.TextIO | None = None,
     max_failures: int = 3,
 ) -> list[dict]:
-    """Print dispatch_status as text; return its rows.
+    """Print the rows of `dispatch_status` as text and return them.
 
     Parameters
     ----------
     dispatchdir : str
-        The dispatchdir holding the dispatches.
+        Path of the dispatchdir.
     file : TextIO or None, default None
-        Where to print; None for stdout.
+        Where to print; None prints to stdout.
     max_failures : int, default 3
         How many failed trials to list per dispatch.
 
     Returns
     -------
     list of dict
-        The rows of dispatch_status.
+        The rows of `dispatch_status`.
     """
     rows = dispatch_status(dispatchdir, max_failures=max_failures)
     for row in rows:

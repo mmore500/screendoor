@@ -6,17 +6,17 @@ from ...orch.slurm._render_sbatch import render_preamble
 
 
 def chain_job_name(dispatchdir: str) -> str:
-    """The job name shared by every daemon job of ``dispatchdir``.
+    """Name the daemon jobs of `dispatchdir`, which all share one name.
 
     Parameters
     ----------
     dispatchdir : str
-        The daemon's dispatchdir.
+        Path of the daemon's dispatchdir.
 
     Returns
     -------
     str
-        ``screendoor-daemon-<digest of its absolute path>``.
+        `screendoor-daemon-<digest of the dispatchdir's absolute path>`.
     """
     digest = hashlib.sha256(os.path.abspath(dispatchdir).encode()).hexdigest()
     return f"screendoor-daemon-{digest[:8]}"
@@ -30,19 +30,21 @@ def render_daemon_sbatch(
     script_dir: str = "~/slurmscripts",
     log_dir: str = "~/slurmlogs",
 ) -> str:
-    """Render one daemon job: queue the successor first, then tick once.
+    """Render the script of one daemon job, which queues its successor and
+    then ticks once.
 
-    The successor is timed by its own ``--begin``, not by waiting for
-    this job to end.
+    The successor is timed by its own `--begin`, not by waiting for this
+    job to end.
 
     Parameters
     ----------
     dispatchdir : str
-        The daemon's dispatchdir.
+        Path of the daemon's dispatchdir.
     python : str
         The command that runs python with screendoor importable.
     sbatch_flags : str, default ""
-        Extra sbatch flags, as one shell string, passed to the successor.
+        Extra sbatch flags, as one shell string, passed on to the
+        successor.
     script_dir : str, default "~/slurmscripts"
         Where the job keeps a copy of its script.
     log_dir : str, default "~/slurmlogs"

@@ -1,46 +1,47 @@
-from __future__ import annotations
-
 import os
 
 
 def job_dir(ctx: dict, name: str) -> str:
-    """Where a job's batches keep their pidfiles and logs.
+    """Return the directory in which a job's batches keep their pidfiles
+    and logs, `jobs/<name>` in the run directory.
 
     Parameters
     ----------
     ctx : dict
-        The dispatch the job belongs to.
+        The hook context of the dispatch the job belongs to.
     name : str
         The job name.
 
     Returns
     -------
     str
-        ``jobs/<name>`` in the run directory.
+        The directory's path.
     """
     return os.path.join(ctx["run_dir"], "jobs", name)
 
 
 def pidfile(ctx: dict, job: dict) -> str:
-    """The pidfile of one batch of a job.
+    """Return the pidfile of one batch of a job, `jobs/<name>/<index>.pid`
+    in the run directory.
 
     Parameters
     ----------
     ctx : dict
-        The dispatch the job belongs to.
+        The hook context of the dispatch the job belongs to.
     job : dict
-        A trial's recorded job: ``name`` and ``index``.
+        A trial's recorded job, with `name` and `index`.
 
     Returns
     -------
     str
-        ``jobs/<name>/<index>.pid`` in the run directory.
+        The pidfile's path.
     """
     return os.path.join(job_dir(ctx, job["name"]), f"{job['index']}.pid")
 
 
 def _starttime(pid: int) -> str | None:
-    """The process's start time from /proc; None if gone or a zombie."""
+    """Read a process's start time from /proc; None if it is gone or a
+    zombie."""
     try:
         with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
             stat = fh.read()
@@ -51,10 +52,11 @@ def _starttime(pid: int) -> str | None:
 
 
 def read_pidfile(path: str) -> tuple[int, str] | None:
-    """``(pid, start time)``; None if there is no pid yet.
+    """Read a batch's pidfile.
 
-    The pidfile holds both, written as the batch starts, so that a later
-    process that reuses the pid is not taken for the batch.
+    The pidfile holds the pid and the process's start time, written as the
+    batch starts, so that a later process that reuses the pid is not taken
+    for the batch.
 
     Parameters
     ----------
@@ -64,7 +66,7 @@ def read_pidfile(path: str) -> tuple[int, str] | None:
     Returns
     -------
     tuple of (int, str) or None
-        The pid and its start time, or None.
+        The pid and its start time, or None if there is no pid yet.
     """
     try:
         with open(path, encoding="utf-8") as fh:
@@ -75,7 +77,8 @@ def read_pidfile(path: str) -> tuple[int, str] | None:
 
 
 def live_pid(path: str) -> int | None:
-    """The pid of the batch whose pidfile is ``path``, if it still runs.
+    """Return the pid of the batch whose pidfile is `path`, if it still
+    runs.
 
     Parameters
     ----------
@@ -103,7 +106,7 @@ def live_pid(path: str) -> int | None:
 
 
 def is_alive(path: str) -> bool:
-    """Whether the batch whose pidfile is ``path`` still runs.
+    """Is the batch whose pidfile is `path` still running?
 
     Parameters
     ----------

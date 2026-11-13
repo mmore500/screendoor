@@ -1,24 +1,18 @@
-from __future__ import annotations
-
-import typing
-
-if typing.TYPE_CHECKING:
-    from ..auxlib._DispatchContext import DispatchContext
+from ..auxlib._DispatchContext import DispatchContext
 
 
 def select_dispatches(
     ctxs: list[DispatchContext], prefixes: list[str] | None
 ) -> list[DispatchContext]:
-    """The dispatches whose uuids start with one of ``prefixes``; all of
-    them if there are none. Raises LookupError for a prefix that matches no
-    dispatch, or more than one.
+    """Select the dispatches whose uuids start with one of `prefixes`, or
+    all of them if there are no prefixes.
 
     Parameters
     ----------
     ctxs : list of DispatchContext
         The dispatches to choose from.
     prefixes : list of str or None
-        Prefixes of dispatch_uuids.
+        Prefixes of `dispatch_uuid`s.
 
     Returns
     -------

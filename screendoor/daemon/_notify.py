@@ -1,13 +1,8 @@
-from __future__ import annotations
-
 import logging
 import typing
 
-from ..auxlib._DispatchContext import LEVELS
+from ..auxlib._DispatchContext import LEVELS, DispatchContext
 from ..auxlib._now_iso import now
-
-if typing.TYPE_CHECKING:
-    from ..auxlib._DispatchContext import DispatchContext
 
 
 def _history(ctx: DispatchContext, level: str) -> list[dict]:
@@ -30,18 +25,21 @@ def _record(
 def notify(
     ctx: DispatchContext, level: str, message: str, data: dict | None = None
 ) -> None:
-    """Hand a notification to its hook; never fails the tick.
+    """Hand a notification to the dispatch's `how_notify_<level>` hook and
+    record the events it returns.
+
+    A notifier that raises is logged; notifying never fails the tick.
 
     Parameters
     ----------
     ctx : DispatchContext
         The dispatch notifying.
     level : str
-        One of LEVELS; the hook is ``how_notify_<level>``.
+        One of `LEVELS`.
     message : str
-        The notification text.
+        The notification's text.
     data : dict or None, default None
-        Extra fields for the notifier, such as ``dedupe_key``.
+        Extra fields for the notifier, such as `dedupe_key`.
     """
     try:
         hook = ctx.hook(f"how_notify_{level}")
@@ -53,7 +51,8 @@ def notify(
 
 
 def flush_batched_notifications(ctx: DispatchContext) -> None:
-    """Let each batching notifier send what it has held back.
+    """Flush each of the dispatch's notifiers that has a `flush`, so that it
+    can send what it has held back.
 
     Parameters
     ----------

@@ -6,3 +6,4 @@ build/
 *.egg-info/
 .tox/
 work-avida/
+examples/avida/work/

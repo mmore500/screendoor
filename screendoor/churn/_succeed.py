@@ -2,7 +2,7 @@ from ._validate import make_action
 
 
 def succeed(summary: dict) -> dict:
-    """Close the dispatch as succeeded.
+    """Create a `succeed` action, completing the dispatch as succeeded.
 
     Parameters
     ----------
@@ -12,14 +12,14 @@ def succeed(summary: dict) -> dict:
     Returns
     -------
     dict
-        The ``succeed`` action.
+        The action.
 
     Raises
     ------
     TypeError
-        If ``summary`` is not a dict.
+        If `summary` is not a dict.
     ValueError
-        If ``summary`` is not JSON-serializable.
+        If `summary` is not JSON-serializable.
     """
     if not isinstance(summary, dict):
         raise TypeError("succeed summary must be a dict")

@@ -5,19 +5,20 @@ from .._knockout import ACCEPT, KnockoutSearch, make_search_churn, split
 
 class DdminSearch(KnockoutSearch):
     """Parallel partition-union delta debugging: disjoint chunk knockouts,
-    union / partial-union repair of passing chunks, bisection of the
+    union and partial-union repair of passing chunks, and bisection of the
     survivors."""
 
     policy = "ddmin"
 
     def search(self) -> typing.Generator[dict, dict, str]:
-        """Generator: parallel partition-union delta debugging.
+        """Run parallel partition-union delta debugging from the initial
+        chunks.
 
         Returns
         -------
         Generator[dict, dict, str]
-            Yields genotype batches, is sent their verdicts, and returns
-            the search's status.
+            Yields waves and is sent their verdicts; returns the search's
+            status.
         """
         return (
             yield from self.partition_union(self.initial_chunks(), "ddmin")
@@ -31,9 +32,10 @@ class DdminSearch(KnockoutSearch):
         pivot: typing.Callable[[], typing.Generator[dict, dict, str]]
         | None = None,
     ) -> typing.Generator[dict, dict, str]:
-        """Generator: parallel partition-union delta debugging, starting
-        from ``k`` chunks. With ``pivot`` (a generator function), hand
-        over to it once chunks stop passing.
+        """Run parallel partition-union delta debugging from `k` chunks.
+
+        With `pivot`, a generator function, hand over to it once chunks
+        stop passing.
 
         Parameters
         ----------
@@ -47,8 +49,8 @@ class DdminSearch(KnockoutSearch):
         Returns
         -------
         Generator[dict, dict, str]
-            Yields genotype batches, is sent their verdicts, and returns
-            the search's status.
+            Yields waves and is sent their verdicts; returns the search's
+            status.
         """
         while len(self.current) >= 2 and k < len(self.current):
             small = self.exact and k >= 8 and len(self.current) <= 2 * self.b
@@ -89,9 +91,10 @@ class DdminSearch(KnockoutSearch):
 def make_churn(
     *, num_control_trials: int = 40
 ) -> typing.Callable[[dict, list[dict], list[dict], list[dict]], list[dict]]:
-    """Skeletonize by parallel partition-union delta debugging.
+    """Create a churn function that skeletonizes by parallel
+    partition-union delta debugging.
 
-    See docs/skeletonization.md.
+    See docs/skeletonization.md for the assay kwargs.
 
     Parameters
     ----------
@@ -101,9 +104,9 @@ def make_churn(
 
     Returns
     -------
-    Callable
-        The churn function, ``churn(dispatch, trial_submissions,
-        trial_payloads, memo) -> actions``.
+    Callable[[dict, list[dict], list[dict], list[dict]], list[dict]]
+        The churn function, `churn(dispatch, trial_submissions,
+        trial_payloads, memo)`.
     """
     return make_search_churn(
         DdminSearch, num_control_trials=num_control_trials

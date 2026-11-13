@@ -13,7 +13,8 @@ from ..ddmin._churn import DdminSearch
 def multi_dose_probes(
     sites: list[int], batch_size: int, *, include_full: bool = False
 ) -> list[frozenset]:
-    """Pack a dose ladder (100%, 50%, 25%, 12.5%) into one batch.
+    """Pack a dose ladder (100%, 50%, 25% and 12.5% of `sites`) into one
+    batch of probe masks.
 
     Parameters
     ----------
@@ -22,7 +23,7 @@ def multi_dose_probes(
     batch_size : int
         The most probes to return.
     include_full : bool, default False
-        Whether to include the 100% dose, all of ``sites``.
+        Whether to include the 100% dose, all of `sites`.
 
     Returns
     -------
@@ -40,20 +41,20 @@ def multi_dose_probes(
 
 class HybridSearch(DdminSearch):
     """One multi-dose pilot batch (50/25/12.5% doses); then top-down ddmin
-    (DdminSearch.partition_union) with pivots to a bottom-up singleton
+    (`DdminSearch.partition_union`) with pivots to a bottom-up singleton
     sieve and subspace reduction."""
 
     policy = "hybrid"
 
     def search(self) -> typing.Generator[dict, dict, str]:
-        """Generator: multi-dose pilot, then top-down ddmin with pivots to
-        the bottom-up sieve.
+        """Run the multi-dose pilot, then top-down ddmin with pivots to the
+        bottom-up sieve.
 
         Returns
         -------
         Generator[dict, dict, str]
-            Yields genotype batches, is sent their verdicts, and returns
-            the search's status.
+            Yields waves and is sent their verdicts; returns the search's
+            status.
         """
         sites = sorted(self.current)
         m = len(sites)
@@ -80,14 +81,14 @@ class HybridSearch(DdminSearch):
         )
 
     def sieve(self) -> typing.Generator[dict, dict, str]:
-        """Generator: bottom-up singleton sieve, then top-down reduction of
+        """Run the bottom-up singleton sieve, then top-down reduction of
         the non-essential sites.
 
         Returns
         -------
         Generator[dict, dict, str]
-            Yields genotype batches, is sent their verdicts, and returns
-            the search's status.
+            Yields waves and is sent their verdicts; returns the search's
+            status.
         """
         singles = self.untried(singletons(sorted(self.current)), 1)
         if not singles:
@@ -149,10 +150,10 @@ class HybridSearch(DdminSearch):
 def make_churn(
     *, num_control_trials: int = 40
 ) -> typing.Callable[[dict, list[dict], list[dict], list[dict]], list[dict]]:
-    """Skeletonize by a multi-dose pilot, then top-down ddmin with pivots
-    to a bottom-up singleton sieve.
+    """Create a churn function that skeletonizes by a multi-dose pilot,
+    then top-down ddmin with pivots to a bottom-up singleton sieve.
 
-    See docs/skeletonization.md.
+    See docs/skeletonization.md for the assay kwargs.
 
     Parameters
     ----------
@@ -162,9 +163,9 @@ def make_churn(
 
     Returns
     -------
-    Callable
-        The churn function, ``churn(dispatch, trial_submissions,
-        trial_payloads, memo) -> actions``.
+    Callable[[dict, list[dict], list[dict], list[dict]], list[dict]]
+        The churn function, `churn(dispatch, trial_submissions,
+        trial_payloads, memo)`.
     """
     return make_search_churn(
         HybridSearch, num_control_trials=num_control_trials

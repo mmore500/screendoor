@@ -5,6 +5,16 @@ History
 Unreleased
 ----------
 
+* ``scd.record.lockedjsonl`` is folded into ``scd.record.appendjsonl``,
+  whose hooks take ``lock=True`` (and ``timeout=``) to read and write under
+  ``fcntl`` locks.
+* Records no longer carry a ``schema`` field.
+* Fixed ``scd.orch.subprocess.throttle``, which never throttled: it looked
+  for pidfiles one directory level too shallow for the run directory
+  layout.
+* ``examples/avida`` runs Avida from the ``ghcr.io/devosoft/avida``
+  container through ``singularity exec``, so it needs no local build, and
+  labels each dispatch with its organism and policy.
 * Assay ``skeletonization.gama``: the Guess/Add/Mate genetic algorithm of
   Rees-Garbutt et al. (2020), with the paper's population sizes as
   defaults. Knockout search summaries can carry policy ``stats``.

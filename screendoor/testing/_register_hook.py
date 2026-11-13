@@ -5,7 +5,8 @@ _REGISTRY: dict = {}
 
 
 def register_hook(obj: typing.Any) -> str:
-    """Return a hook expression that evaluates to ``obj`` in this process.
+    """Register `obj` and return a hook expression that evaluates to it in
+    this process.
 
     Parameters
     ----------
@@ -15,7 +16,7 @@ def register_hook(obj: typing.Any) -> str:
     Returns
     -------
     str
-        A ``scd.testing.registered_hook(...)`` expression.
+        A `scd.testing.registered_hook(...)` expression.
     """
     token = uuid.uuid4().hex
     _REGISTRY[token] = obj
@@ -23,12 +24,12 @@ def register_hook(obj: typing.Any) -> str:
 
 
 def registered_hook(token: str) -> typing.Any:
-    """The object ``register_hook`` registered under ``token``.
+    """Return the object `register_hook` registered under `token`.
 
     Parameters
     ----------
     token : str
-        The token in the expression ``register_hook`` returned.
+        The token in the expression `register_hook` returned.
 
     Returns
     -------

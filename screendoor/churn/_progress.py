@@ -2,7 +2,8 @@ from ._validate import make_action
 
 
 def progress(done: int, total: int, message: str | None = None) -> dict:
-    """Report ``done`` of ``total`` steps complete.
+    """Create a `progress` action, reporting `done` of `total` steps
+    complete.
 
     Parameters
     ----------
@@ -16,7 +17,7 @@ def progress(done: int, total: int, message: str | None = None) -> dict:
     Returns
     -------
     dict
-        The ``progress`` action.
+        The action.
     """
     kwargs = {"done": int(done), "total": int(total)}
     if message is not None:

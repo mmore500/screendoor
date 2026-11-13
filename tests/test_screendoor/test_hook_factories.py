@@ -13,7 +13,6 @@ MODULES = (
     scd.notify.null,
     scd.notify.pushover,
     scd.record.appendjsonl,
-    scd.record.lockedjsonl,
     scd.record.slottedjsonl,
     scd.unblock,
     scd.cleanup,

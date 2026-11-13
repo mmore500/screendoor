@@ -9,17 +9,18 @@ from ._render_daemon_sbatch import chain_job_name
 
 
 def queued_chain_jobs(dispatchdir: str) -> list[tuple[str, str]]:
-    """Pending daemon jobs, as ``(jobid, start time)`` string pairs.
+    """List the pending daemon jobs of `dispatchdir`.
 
     Parameters
     ----------
     dispatchdir : str
-        The daemon's dispatchdir.
+        Path of the daemon's dispatchdir.
 
     Returns
     -------
     list of tuple of (str, str)
-        One per pending job, as squeue prints them.
+        One `(job id, start time)` pair per pending job, as `squeue` prints
+        them.
     """
     out = _rsc.run(
         [
@@ -37,18 +38,20 @@ def queued_chain_jobs(dispatchdir: str) -> list[tuple[str, str]]:
 def earliest_begin(
     dispatchdir: str, *, successor: bool = False
 ) -> datetime.datetime | None:
-    """Earliest next firing over active dispatches; None if there are none.
+    """Find the earliest time an active dispatch of `dispatchdir` is next
+    due.
 
-    With ``successor``, a dispatch due now counts at its following cron
+    With `successor`, a dispatch due now counts at its following cron
     firing instead: the daemon job queueing the successor is about to tick
-    it, so the successor's ``--begin`` is when it is next due after that.
+    it, so the successor's `--begin` is when the dispatch is next due after
+    that.
 
     Parameters
     ----------
     dispatchdir : str
-        The dispatchdir holding the dispatches.
+        Path of the dispatchdir.
     successor : bool, default False
-        Whether the begin is for a successor job.
+        Whether the time is the `--begin` of a successor job.
 
     Returns
     -------
@@ -68,7 +71,8 @@ def earliest_begin(
 
 
 def slurm_time(dt: datetime.datetime) -> str:
-    """Format ``dt`` as Slurm takes a time, in local time.
+    """Format `dt` as Slurm takes a time, `YYYY-MM-DDTHH:MM:SS` in local
+    time.
 
     Parameters
     ----------
@@ -78,18 +82,19 @@ def slurm_time(dt: datetime.datetime) -> str:
     Returns
     -------
     str
-        ``YYYY-MM-DDTHH:MM:SS``.
+        The formatted time.
     """
     return dt.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def pull_successor_forward(dispatchdir: str, begin: datetime.datetime) -> bool:
-    """Move pending daemon jobs' start up to ``begin``; False if none.
+    """Move the start of any pending daemon job of `dispatchdir` up to
+    `begin`.
 
     Parameters
     ----------
     dispatchdir : str
-        The daemon's dispatchdir.
+        Path of the daemon's dispatchdir.
     begin : datetime.datetime
         The latest start to allow.
 

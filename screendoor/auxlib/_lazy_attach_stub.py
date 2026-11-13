@@ -12,21 +12,22 @@ def lazy_attach_stub(
     typing.Callable[[], list[str]],
     list[str],
 ]:
-    """Lazily attach the names in the ``__init__.pyi`` beside ``init_file``.
+    """Attach the names a package's `__init__.pyi` stub imports to the
+    package lazily, importing each on first access.
 
-    Understands ``from ._mod import name`` and ``from . import sub``.
+    The stub may use `from ._mod import name` and `from . import sub`.
 
     Parameters
     ----------
     package_name : str
-        The package's ``__name__``.
+        The package's `__name__`.
     init_file : str
-        The package's ``__file__``.
+        The package's `__file__`; the stub sits beside it.
 
     Returns
     -------
     tuple
-        ``(__getattr__, __dir__, __all__)`` to assign at module level.
+        `(__getattr__, __dir__, __all__)`, to assign at module level.
     """
     stub = os.path.splitext(init_file)[0] + ".pyi"
     try:

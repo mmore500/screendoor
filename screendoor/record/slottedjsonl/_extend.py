@@ -6,18 +6,18 @@ from ._slot import placeholder, pwrite_all
 
 
 def extend(path: str, n: int, slot_bytes: int | None = None) -> None:
-    """Grow the file to ``n`` slots; never shrink it.
+    """Grow the slotted file `path` to `n` slots; never shrink it.
 
-    Safe while writers fill existing slots, and repeatable: it rewrites a
-    partial last slot left by a crashed extension. Extensions take turns
-    under an exclusive lock on ``<path>.extend.lock``.
+    Safe to run while writers fill existing slots, and to repeat: a partial
+    last slot left by a crashed extension is rewritten. Extensions take
+    turns under an exclusive lock on `<path>.extend.lock`.
 
     Parameters
     ----------
     path : str
         The slotted file.
     n : int
-        How many slots it should have.
+        How many slots the file should have.
     slot_bytes : int or None, default None
         The slot size; None takes the file's own.
     """

@@ -2,7 +2,7 @@ from ._read import read
 
 
 def missing(path: str, n: int, slot_bytes: int | None = None) -> list[int]:
-    """Return the sorted indices in ``0..n-1`` whose slots are not valid.
+    """List the indices below `n` whose slots in `path` are not valid.
 
     Rerunning the writers for exactly these indices is always safe.
 
@@ -18,7 +18,7 @@ def missing(path: str, n: int, slot_bytes: int | None = None) -> list[int]:
     Returns
     -------
     list of int
-        The indices of the slots not valid.
+        The indices of the invalid slots, ascending.
     """
     valid = read(path, n, slot_bytes)
     return [i for i in range(n) if i not in valid]

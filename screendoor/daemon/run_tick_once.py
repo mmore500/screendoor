@@ -5,24 +5,12 @@ import sys
 
 from ..auxlib._begin_prod_logging import begin_prod_logging
 from ..auxlib._format_cli_description import format_cli_description
+from ._run_tick_once import run_tick_once
+from ._signals import install_usr1_handler
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run run_tick_once from the command line.
-
-    Parameters
-    ----------
-    argv : list of str or None, default None
-        The arguments; None for ``sys.argv[1:]``.
-
-    Returns
-    -------
-    int
-        The exit code: 0.
-    """
-    from ._run_tick_once import run_tick_once
-    from ._signals import install_usr1_handler
-
+    """Run `run_tick_once` from the command line; return the exit code."""
     parser = argparse.ArgumentParser(
         prog="python3 -m screendoor.daemon.run_tick_once",
         description=format_cli_description(__doc__),

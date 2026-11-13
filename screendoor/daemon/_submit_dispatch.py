@@ -6,12 +6,11 @@ import uuid
 from ..auxlib._DispatchContext import (
     DEFAULTS,
     HOOK_NAMES,
-    NAMES,
+    LABEL_NAMES,
     SEED_NAME,
     DispatchdirHooks,
     MissingHookError,
     load_dispatches,
-    missing_hooks,
     run_dir_name,
 )
 from ..auxlib._eval_hook import eval_hook, make_eval_namespace
@@ -22,22 +21,22 @@ SETTINGS = {*DEFAULTS, SEED_NAME, "assay", "schedule", "dispatch_uuid"}
 
 
 def validate_dispatch(obj: dict) -> None:
-    """Check a dispatch before it is recorded.
+    """Check that `obj` is a valid dispatch before it is recorded.
 
-    Checks its keys and their types, its ``schedule``, and that its
-    ``assay`` and every hook evaluate.
+    Checks the dispatch's keys and their types, parses its `schedule`, and
+    evaluates its `assay` and every hook expression.
 
     Parameters
     ----------
     obj : dict
-        The dispatch, as parsed JSON.
+        The dispatch, as parsed from JSON.
 
     Raises
     ------
     MissingHookError
-        If ``obj`` does not set every hook.
+        If `obj` leaves a hook unset.
     ValueError
-        If ``obj`` is otherwise not a valid dispatch.
+        If `obj` is otherwise not a valid dispatch.
     """
     if not isinstance(obj, dict):
         raise ValueError("a dispatch must be a JSON object")
@@ -45,15 +44,15 @@ def validate_dispatch(obj: dict) -> None:
         if key not in obj:
             raise ValueError(f"dispatch needs {key!r}")
     parse_cron(obj["schedule"])
-    missing = missing_hooks(HOOK_NAMES, obj)
-    if missing:  # no hook has a default
+    missing = [name for name in HOOK_NAMES if name not in obj]
+    if missing:
         raise MissingHookError("dispatch must set " + ", ".join(missing))
     for key, value in obj.items():
         if key not in SETTINGS and key not in HOOK_NAMES:
             raise ValueError(f"unknown dispatch key {key!r}")
         if key in HOOK_NAMES and not isinstance(value, str):
             raise ValueError(f"{key} must be an expression string")
-    for key in NAMES:
+    for key in LABEL_NAMES:
         if not isinstance(obj.get(key, ""), str):
             raise ValueError(f"{key} must be a string")
     if "dispatch_uuid" in obj:
@@ -84,37 +83,37 @@ def validate_dispatch(obj: dict) -> None:
 
 
 def submit_dispatch(obj: dict, dispatchdir: str) -> str:
-    """Record a new dispatch; return its dispatch_uuid.
+    """Record a new dispatch in `dispatchdir`.
 
-    Fills in ``dispatch_uuid``, ``meta_seed`` (32 random bits from the
-    operating system) and any absent ``meta_*`` label (``"0"`` for
-    ``meta_redo``, ``"default"`` for the rest). Refuses a dispatch whose
-    run directory an open dispatch already uses.
+    Fills in `dispatch_uuid`, `meta_seed` (32 random bits from the operating
+    system) and any absent `meta_*` label (`"0"` for `meta_redo`,
+    `"default"` for the rest). Submitting only records the dispatch; a
+    daemon must be started separately to run it.
 
     Parameters
     ----------
     obj : dict
-        The dispatch, as parsed JSON; not modified.
+        The dispatch, as parsed from JSON; not modified.
     dispatchdir : str
-        The dispatchdir to record it in.
+        Path of the dispatchdir.
 
     Returns
     -------
     str
-        The new dispatch's dispatch_uuid.
+        The new dispatch's `dispatch_uuid`.
 
     Raises
     ------
     DispatchdirConfigError
-        If the dispatchdir's ``dispatch_hooks.json`` is missing or wrong.
+        If the dispatchdir's `dispatch_hooks.json` is missing or wrong.
     ValueError
-        If ``obj`` is not a valid dispatch, its dispatch_uuid exists, or
-        an open dispatch uses its run directory.
+        If `obj` is not a valid dispatch, its `dispatch_uuid` is taken, or
+        an open dispatch already uses its run directory.
     """
     obj = json.loads(json.dumps(obj))  # a deep copy that must be JSON
     validate_dispatch(obj)
     obj.setdefault("dispatch_uuid", str(uuid.uuid4()))
-    for key in NAMES:
+    for key in LABEL_NAMES:
         obj.setdefault(key, DEFAULTS[key])
     obj.setdefault(SEED_NAME, secrets.randbits(32))
     ddhooks = DispatchdirHooks(dispatchdir)
@@ -127,11 +126,11 @@ def submit_dispatch(obj: dict, dispatchdir: str) -> str:
                 f"open dispatch {ctx.dispatch_uuid} uses {run_dir}; "
                 "change meta_redo"
             )
-    ddhooks.write_dispatch_submissions(
+    ddhooks.write_dispatch_submission(
         {
             "event": "submitted",
             "dispatch_uuid": obj["dispatch_uuid"],
-            **{key: obj[key] for key in (*NAMES, SEED_NAME)},
+            **{key: obj[key] for key in (*LABEL_NAMES, SEED_NAME)},
             "dispatch": obj,
         },
     )

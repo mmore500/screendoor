@@ -1,12 +1,12 @@
 def batch_trials(trials: list[dict], batchsize: int) -> list[list[dict]]:
-    """Split ``trials`` into consecutive batches of ``batchsize``.
+    """Split `trials` into consecutive batches of `batchsize`.
 
     Parameters
     ----------
     trials : list of dict
         The trials, in order.
     batchsize : int
-        Trials per batch; the last may have fewer.
+        Trials per batch; the last batch may hold fewer.
 
     Returns
     -------

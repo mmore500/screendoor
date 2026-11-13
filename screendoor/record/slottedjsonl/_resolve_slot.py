@@ -2,9 +2,8 @@ from ._slot import DEFAULT_SLOT, check_slot
 
 
 def file_slot(path: str) -> int | None:
-    """The slot size a slotted file was made with: its first line's length.
-
-    None if the file is missing or has no complete first slot yet.
+    """Find the slot size a slotted file was made with: the length of its
+    first line.
 
     Parameters
     ----------
@@ -14,7 +13,8 @@ def file_slot(path: str) -> int | None:
     Returns
     -------
     int or None
-        The slot size in bytes, or None.
+        The slot size in bytes, or None if the file is missing or has no
+        complete first slot yet.
     """
     try:
         with open(path, "rb") as fh:
@@ -30,17 +30,15 @@ def file_slot(path: str) -> int | None:
 
 
 def resolve_slot(path: str, slot_bytes: int | None) -> int:
-    """The slot size to use for ``path``.
-
-    ``None`` takes the file's own, or DEFAULT_SLOT for a file not yet
-    made. A size given that differs from the file's raises ValueError.
+    """Decide the slot size to use for `path`.
 
     Parameters
     ----------
     path : str
         The slotted file, made or not.
     slot_bytes : int or None
-        The slot size asked for, or None.
+        The slot size asked for; None takes the file's own, or
+        `DEFAULT_SLOT` for a file not yet made.
 
     Returns
     -------
@@ -50,8 +48,8 @@ def resolve_slot(path: str, slot_bytes: int | None) -> int:
     Raises
     ------
     ValueError
-        If ``slot_bytes`` is not a positive multiple of 4096 or differs
-        from the file's.
+        If `slot_bytes` is not a positive multiple of 4096, or differs from
+        the file's.
     """
     found = file_slot(path)
     if slot_bytes is None:

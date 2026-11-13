@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import shlex
 
 PREAMBLE = """\
@@ -10,7 +8,7 @@ exec > >(tee -a {log_dir}/"$SLURM_JOB_ID".txt) 2>&1
 
 
 def _quote_dir(path: str) -> str:
-    """Quote ``path``, leaving a leading ``~/`` for the shell to expand."""
+    """Quote `path` for the shell, leaving a leading `~/` to expand."""
     if path.startswith("~/"):
         return "~/" + shlex.quote(path[2:])
     return shlex.quote(path)
@@ -19,19 +17,20 @@ def _quote_dir(path: str) -> str:
 def render_preamble(
     script_dir: str = "~/slurmscripts", log_dir: str = "~/slurmlogs"
 ) -> str:
-    """Render the lines that keep a job's own script and log.
+    """Render the bash lines that keep a copy of a job's script and its
+    log.
 
     Parameters
     ----------
     script_dir : str, default "~/slurmscripts"
-        Where the job copies its script, as ``<job id>.sh``.
+        Where the job copies its script, as `<job id>.sh`.
     log_dir : str, default "~/slurmlogs"
-        Where the job appends its output, as ``<job id>.txt``.
+        Where the job appends its output, as `<job id>.txt`.
 
     Returns
     -------
     str
-        The bash lines, each ending in a newline.
+        The lines, each ending in a newline.
     """
     return PREAMBLE.format(
         script_dir=_quote_dir(script_dir), log_dir=_quote_dir(log_dir)
@@ -47,16 +46,17 @@ def render_sbatch(
     script_dir: str = "~/slurmscripts",
     log_dir: str = "~/slurmlogs",
 ) -> str:
-    """Render one array-job script, named ``name``; task i runs batch i.
+    """Render the script of an array job named `name`, in which task `i`
+    runs batch `i`.
 
     Parameters
     ----------
     ctx : dict
-        The dispatch launching.
+        The hook context of the dispatch launching.
     name : str
         The job name.
     batches : list of list of dict
-        The trial attempts per array task, each with ``trial_uuid``.
+        The trial attempts of each array task, each with a `trial_uuid`.
     worker : str
         The command that starts the worker.
     script_dir : str, default "~/slurmscripts"

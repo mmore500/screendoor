@@ -13,14 +13,13 @@ def replay_dispatch(
     assay: str | None = None,
     file: typing.TextIO | None = None,
 ) -> list[dict]:
-    """Re-run churn at every recorded step, from the state it saw then.
+    """Re-run churn at every recorded step of a dispatch, from the state it
+    saw then, and report whether it decides the same.
 
-    A step is the churn call that made some trial submissions or memos;
-    each records its ``churn_step``. Churn is pure, or seeds itself from
-    that state with scd.churn.seed_global_rngs, so a replay should match.
-
-    With ``assay``, replay that assay expression instead of the recorded
-    one. Prints a line per step and returns the per-step reports.
+    A step is a churn call that made trial submissions or memos; each
+    records its `churn_step`. Churn is pure, or seeds itself from that
+    state with `scd.churn.seed_global_rngs`, so a replay should match. A
+    line is printed per step.
 
     Parameters
     ----------
@@ -29,18 +28,18 @@ def replay_dispatch(
     assay : str or None, default None
         An assay expression to replay in place of the recorded one.
     file : TextIO or None, default None
-        Where to print; None for stdout.
+        Where to print; None prints to stdout.
 
     Returns
     -------
     list of dict
-        One per step, oldest first: ``ts``, ``churn_step``, ``match``,
-        ``recorded_launches`` and ``replayed_launches``.
+        One report per step, oldest first, with `ts`, `churn_step`,
+        `match`, `recorded_launches` and `replayed_launches`.
 
     Raises
     ------
     LookupError
-        If no dispatch has ``run_dir``.
+        If no dispatch has the run directory `run_dir`.
     """
     run_dir = os.path.abspath(run_dir)
     # run dirs are <dispatchdir>/project=.../date=...

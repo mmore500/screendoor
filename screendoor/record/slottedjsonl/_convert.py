@@ -9,10 +9,8 @@ def convert(
     slot_bytes: int | None = None,
     with_index: bool = False,
 ) -> None:
-    """Write the valid records to ``out`` as plain compact JSONL.
-
-    Records come in index order; with ``with_index``, each line is
-    ``{"i": index, "r": record}``.
+    """Write the valid records of the slotted file `path` to `out` as plain
+    compact JSONL, in index order.
 
     Parameters
     ----------
@@ -23,7 +21,8 @@ def convert(
     slot_bytes : int or None, default None
         The slot size; None takes the file's own.
     with_index : bool, default False
-        Write each record with its index.
+        Whether to write each line as `{"i": index, "r": record}` rather
+        than the bare record.
     """
     records = read(path, None, slot_bytes)
     with open(out, "w", encoding="utf-8") as fh:

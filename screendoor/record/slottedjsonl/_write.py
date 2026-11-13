@@ -14,12 +14,12 @@ def write(
     wait: float = 120.0,
     clear_first: bool = False,
 ) -> None:
-    """Write ``record`` into slot ``i``, replacing whatever it held.
+    """Write `record` into slot `i` of `path`, replacing whatever it held.
 
-    Waits up to ``wait`` seconds for the slot to exist, then raises
-    SlotError: a writer never extends the file. With ``clear_first``, the
-    slot is blanked and synced first, so that a crash while overwriting
-    leaves padding, not a mix of two records.
+    A writer never extends the file: it waits up to `wait` seconds for the
+    slot to exist, then raises `SlotError`. With `clear_first`, the slot is
+    blanked and synced before it is written, so that a crash while
+    overwriting leaves padding rather than a mix of two records.
 
     Parameters
     ----------
@@ -34,15 +34,15 @@ def write(
     wait : float, default 120.0
         Seconds to wait for the slot to exist.
     clear_first : bool, default False
-        Blank and sync the slot before writing it.
+        Whether to blank and sync the slot before writing it.
 
     Raises
     ------
     SlotError
-        If the slot does not exist after ``wait`` seconds, ``record`` does
-        not fit it, or a write is short.
+        If the slot does not exist after `wait` seconds, `record` does not
+        fit it, or a write is short.
     ValueError
-        If ``i`` is negative.
+        If `i` is negative.
     """
     slot_bytes = resolve_slot(path, slot_bytes)
     if i < 0:

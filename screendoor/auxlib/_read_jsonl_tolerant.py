@@ -2,61 +2,27 @@ import json
 import logging
 import os
 
-from ._append_jsonl_line import SCHEMA
-
-
-class SchemaTooNewError(RuntimeError):
-    """A record's schema is newer than this code understands."""
-
-
-def read_jsonl_tolerant(path: str) -> list[dict]:
-    """Read records, skipping torn or spliced lines with a warning.
-
-    Parameters
-    ----------
-    path : str
-        The JSONL file; a missing one reads as empty.
-
-    Returns
-    -------
-    list of dict
-        The records, in file order.
-
-    Raises
-    ------
-    SchemaTooNewError
-        On a schema newer than this code understands.
-    """
-    if not os.path.exists(path):
-        return []
-    with open(path, "rb") as fh:
-        return parse_jsonl_tolerant(fh.read(), path)
-
 
 def parse_jsonl_tolerant(data: bytes, path: str) -> list[dict]:
-    """Parse a JSONL file's bytes as read_jsonl_tolerant does; ``path`` is
-    for messages only.
+    """Parse the records in JSONL `data`, skipping lines that are torn,
+    spliced or not event records.
+
+    Each skipped line is logged as a warning.
 
     Parameters
     ----------
     data : bytes
         The file's contents.
     path : str
-        The file's path.
+        The file's path, for log messages.
 
     Returns
     -------
     list of dict
         The records, in order.
-
-    Raises
-    ------
-    SchemaTooNewError
-        On a schema newer than this code understands.
     """
-    lines = data.split(b"\n")
     records = []
-    for lineno, line in enumerate(lines, start=1):
+    for lineno, line in enumerate(data.split(b"\n"), start=1):
         if not line.strip():
             continue
         try:
@@ -71,10 +37,25 @@ def parse_jsonl_tolerant(data: bytes, path: str) -> list[dict]:
                 line,
             )
             continue
-        if record.get("schema", 1) > SCHEMA:
-            raise SchemaTooNewError(
-                f"{path}:{lineno} has schema {record['schema']}; "
-                f"this screendoor reads up to {SCHEMA}"
-            )
         records.append(record)
     return records
+
+
+def read_jsonl_tolerant(path: str) -> list[dict]:
+    """Read the records in the JSONL file `path`, skipping torn lines with
+    a warning.
+
+    Parameters
+    ----------
+    path : str
+        The JSONL file; a missing file reads as empty.
+
+    Returns
+    -------
+    list of dict
+        The records, in file order.
+    """
+    if not os.path.exists(path):
+        return []
+    with open(path, "rb") as fh:
+        return parse_jsonl_tolerant(fh.read(), path)

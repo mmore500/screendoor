@@ -10,6 +10,7 @@ from screendoor.daemon import (
     run_tick_once,
     submit_dispatch,
 )
+from screendoor.orch.subprocess import throttle
 from screendoor.orch.subprocess._procs import is_alive, pidfile
 from screendoor.testing import INLINE_HOOKS
 
@@ -96,6 +97,30 @@ def test_running_jobs_survive_a_daemon_crash(dispatchdir, monkeypatch):
     trials = ctx.read_trials()
     assert all(t["attempt"] == 0 for t in trials)  # poke found them alive
     assert len(os.listdir(os.path.join(ctx.run_dir, "jobs"))) == 1
+
+
+def test_throttle_counts_running_batches(dispatchdir):
+    submit_dispatch(
+        {
+            "assay": "scd.assaylib.testing.exercise",
+            "assay_kwargs": {"n": 2, "cmd": "sleep 60"},
+            "schedule": "* * * * *",
+            **INLINE_HOOKS,
+            "trial_batch_timeout": 120,
+            "how_launch": "scd.orch.subprocess.launch()",
+            "how_poke": "scd.orch.subprocess.poke()",
+            "how_kill": "scd.orch.subprocess.kill()",
+        },
+        dispatchdir,
+    )
+    (ctx,) = run_tick_once(dispatchdir)  # two batches, now running
+    assert not throttle(max_procs=2)(ctx.hook_ctx)
+    assert throttle(max_procs=3)(ctx.hook_ctx)
+    kill_dispatch(dispatchdir)
+    deadline = time.time() + 10
+    while not throttle(max_procs=1)(ctx.hook_ctx) and time.time() < deadline:
+        time.sleep(0.05)
+    assert throttle(max_procs=1)(ctx.hook_ctx)
 
 
 def test_kill_stops_the_trial_processes(dispatchdir):

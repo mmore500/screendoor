@@ -4,23 +4,11 @@ import argparse
 import sys
 
 from ..auxlib._format_cli_description import format_cli_description
+from ._resume_dispatch import resume_dispatch
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run resume_dispatch from the command line.
-
-    Parameters
-    ----------
-    argv : list of str or None, default None
-        The arguments; None for ``sys.argv[1:]``.
-
-    Returns
-    -------
-    int
-        The exit code: 0, or 2 if a dispatch prefix matches none or several.
-    """
-    from ._resume_dispatch import resume_dispatch
-
+    """Run `resume_dispatch` from the command line; return the exit code."""
     parser = argparse.ArgumentParser(
         prog="python3 -m screendoor.daemon.resume_dispatch",
         description=format_cli_description(__doc__),

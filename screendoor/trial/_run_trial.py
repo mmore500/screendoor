@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import logging
 import os
@@ -8,15 +6,15 @@ import tempfile
 import threading
 import typing
 
-if typing.TYPE_CHECKING:
-    from ..auxlib._DispatchContext import DispatchContext
+from ..auxlib._DispatchContext import DispatchContext
 
 TAG = "!!!screendoor:"
 PIPE_GRACE_S = 10  # how long output may trail the script's exit
 
 
 def latest_request(submissions: list[dict], trial_uuid: str) -> dict:
-    """The trial's latest ``requested`` submission.
+    """Find a trial's latest `requested` submission, the one with the
+    highest `attempt`.
 
     Parameters
     ----------
@@ -28,7 +26,7 @@ def latest_request(submissions: list[dict], trial_uuid: str) -> dict:
     Returns
     -------
     dict
-        The ``requested`` submission with the highest ``attempt``.
+        The submission.
 
     Raises
     ------
@@ -46,7 +44,8 @@ def latest_request(submissions: list[dict], trial_uuid: str) -> dict:
 
 
 class _TagCollector:
-    """Collects the tagged lines of one trial; fed from two threads."""
+    """Collector of the tagged lines of one trial, fed from the stdout and
+    stderr pump threads."""
 
     def __init__(
         self, ctx: DispatchContext, trial_uuid: str, attempt: int
@@ -91,6 +90,39 @@ def _pump(
             collector.feed(raw.decode(errors="replace"))
 
 
+def _run_script(
+    script: str,
+    cwd: str,
+    env: dict[str, str],
+    attempt_dir: str,
+    collector: _TagCollector,
+) -> int:
+    """Run `script`, logging and scanning its output; return its exit
+    code."""
+    proc = subprocess.Popen(
+        ["bash", script],
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    threads = [
+        threading.Thread(
+            target=_pump,
+            args=(stream, os.path.join(attempt_dir, f"{name}.txt"), collector),
+            daemon=True,
+        )
+        for name, stream in (("stdout", proc.stdout), ("stderr", proc.stderr))
+    ]
+    for thread in threads:
+        thread.start()
+    code = proc.wait()
+    for thread in threads:  # a child left holding a pipe can't stall us
+        thread.join(timeout=PIPE_GRACE_S)
+    return code
+
+
 def run_trial(
     ctx: DispatchContext,
     trial_uuid: str,
@@ -99,12 +131,10 @@ def run_trial(
     """Run one trial to completion and record how it ended.
 
     The script runs in a fresh temporary directory, deleted afterwards;
-    ``cmd.sh`` and, per attempt, ``attempt-<n>/stdout.txt`` and
-    ``stderr.txt`` are kept in the trial directory,
-    ``$SCREENDOOR_TRIAL_DIR``. ``started`` goes to trial telemetry; the
-    trial payload is ``completed``, with the script's result, if it
-    exited 0, else ``failed``. ``submissions`` saves re-reading the trial
-    submissions for each trial of a batch.
+    `cmd.sh` and, per attempt, `attempt-<n>/stdout.txt` and `stderr.txt`
+    are kept in the trial directory, `$SCREENDOOR_TRIAL_DIR`. A `started`
+    event goes to trial telemetry; the trial payload is `completed`, with
+    the script's result, if it exited 0, else `failed`.
 
     Parameters
     ----------
@@ -113,7 +143,8 @@ def run_trial(
     trial_uuid : str
         The trial to run.
     submissions : list of dict or None, default None
-        The dispatch's trial submissions; read from ``ctx`` if None.
+        The dispatch's trial submissions, to save re-reading them for each
+        trial of a batch; read from `ctx` if None.
     """
     if submissions is None:
         submissions = ctx.read_trial_submissions()
@@ -157,36 +188,3 @@ def run_trial(
         )
     else:
         ctx.write_trial_payload({"event": "failed", **base})
-
-
-def _run_script(
-    script: str,
-    cwd: str,
-    env: dict[str, str],
-    attempt_dir: str,
-    collector: _TagCollector,
-) -> int:
-    """Run ``script``, logging and scanning its output; return its exit
-    code."""
-    proc = subprocess.Popen(
-        ["bash", script],
-        cwd=cwd,
-        env=env,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    threads = [
-        threading.Thread(
-            target=_pump,
-            args=(stream, os.path.join(attempt_dir, f"{name}.txt"), collector),
-            daemon=True,
-        )
-        for name, stream in (("stdout", proc.stdout), ("stderr", proc.stderr))
-    ]
-    for thread in threads:
-        thread.start()
-    code = proc.wait()
-    for thread in threads:  # a child left holding a pipe can't stall us
-        thread.join(timeout=PIPE_GRACE_S)
-    return code

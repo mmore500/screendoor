@@ -1,3 +1,7 @@
+"""Machinery shared by the knockout skeletonization policies: the search
+base class, the controls that judge scores, and replaying a search as
+churn."""
+
 from ....auxlib._lazy_attach_stub import lazy_attach_stub
 
 __getattr__, __dir__, __all__ = lazy_attach_stub(__name__, __file__)

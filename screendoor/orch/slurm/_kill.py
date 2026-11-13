@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 import typing
 
@@ -7,13 +5,14 @@ from . import _run_slurm_command as _rsc
 
 
 def kill() -> typing.Callable[[dict, list[dict]], None]:
-    """Cancel the trials' array tasks with one ``scancel``.
+    """Create a `how_kill` hook that cancels the trials' array tasks with
+    one `scancel`.
 
     Returns
     -------
-    Callable[[dict, list], None]
-        The ``how_kill`` hook: ``(ctx, trials)`` cancels those of the
-        trials' array tasks still queued; a failure is logged, not raised.
+    Callable[[dict, list[dict]], None]
+        Hook `kill(ctx, trials)`, which cancels those of the trials' array
+        tasks still queued; a failure is logged, not raised.
     """
 
     def kill(ctx: dict, trials: list[dict]) -> None:

@@ -1,23 +1,18 @@
-from __future__ import annotations
-
 import logging
 import os
 import platform
 import shutil
-import typing
 
 from .. import __version__
-
-if typing.TYPE_CHECKING:
-    from ..auxlib._DispatchContext import DispatchContext
+from ..auxlib._DispatchContext import DispatchContext
 
 
 def setup_dispatch(ctx: DispatchContext) -> None:
-    """Start the dispatch's run directory afresh, then call how_setup and
-    record ``setup``.
+    """Start the dispatch's run directory afresh, call `how_setup` and
+    record a `setup` event.
 
     A run directory left by an earlier dispatch with the same labels is
-    deleted first: bump ``meta_redo`` to keep it.
+    deleted first; bump `meta_redo` to keep it.
 
     Parameters
     ----------

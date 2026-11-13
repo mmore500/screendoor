@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import contextlib
 import typing
 
@@ -12,25 +10,25 @@ from ._trial_slots import slots_path
 def prep_trial_payloads(
     *, slot_bytes: int | None = None
 ) -> typing.Callable[[dict, int], None]:
-    """Give trial_payloads.slots.jsonl a slot for each of the ``n_trials``
-    trials.
+    """Create a `how_prep_trial_payloads` hook that gives
+    `trial_payloads.slots.jsonl` a slot per trial.
 
-    The daemon calls this before launching, so that every worker's slot
-    exists before the worker starts.
+    The daemon calls the hook before each launch, so that every worker's
+    slot exists before the worker starts.
 
     Parameters
     ----------
     slot_bytes : int or None, default None
-        The slot size in bytes, a multiple of 4096; it is fixed when the
-        file is made, and read and write hooks left at ``slot_bytes=None``
-        take it from the file. None makes a new file with DEFAULT_SLOT
-        (32768).
+        The slot size in bytes, a multiple of 4096. The size is fixed when
+        the file is made, and read and write hooks left at
+        `slot_bytes=None` take it from the file. None makes a new file with
+        `DEFAULT_SLOT` (32768) byte slots.
 
     Returns
     -------
     Callable[[dict, int], None]
-        The ``how_prep_trial_payloads`` hook: ``(ctx, n_trials)`` makes
-        the file if missing and extends it to ``n_trials`` slots.
+        Hook `prep_trial_payloads(ctx, n_trials)`, which makes the file if
+        missing and extends it to `n_trials` slots.
     """
 
     def prep_trial_payloads(ctx: dict, n_trials: int) -> None:

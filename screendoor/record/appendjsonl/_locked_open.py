@@ -9,12 +9,12 @@ POLL_S = 0.05
 
 
 class LockTimeoutError(TimeoutError):
-    """The file's lock was not acquired within the timeout."""
+    """Raised when a file's lock is not acquired within the timeout."""
 
 
 # fcntl locks belong to the process, not the thread or the descriptor, so
-# threads of one process (a worker's stdout and stderr pumps) would all
-# hold the same lock at once; a per-path thread lock excludes them too
+# threads of one process (a worker's stdout and stderr pumps) would all hold
+# the same lock at once; a per-path thread lock excludes them too
 _thread_locks: dict = {}
 _guard = threading.Lock()
 
@@ -34,16 +34,14 @@ def _remaining(deadline: float | None) -> float:
 def locked_open(
     path: str, flags: int, *, exclusive: bool, timeout: float | None = None
 ) -> typing.Iterator[int]:
-    """Open ``path`` and yield its descriptor under an fcntl record lock.
+    """Open `path` and yield its descriptor under an fcntl record lock.
 
-    The lock is exclusive for writers and shared for readers, and is
-    released, with the descriptor closed, on exit. With ``timeout``,
-    raises LockTimeoutError if the lock is not had within that many
-    seconds; otherwise waits as long as it takes.
+    The lock is exclusive for writers and shared for readers. On exit, the
+    lock is released and the descriptor closed.
 
-    POSIX locks are dropped when the process closes *any* descriptor for
-    the file, so nothing else in the process should open these files
-    while one is held; the per-path thread lock covers this package's own
+    POSIX locks are dropped when the process closes *any* descriptor of the
+    file, so nothing else in the process should open a locked file while
+    the lock is held; the per-path thread lock covers this package's own
     calls.
 
     Parameters
@@ -51,11 +49,12 @@ def locked_open(
     path : str
         The file to open.
     flags : int
-        Flags for ``os.open``; a file it creates gets mode 600.
+        Flags for `os.open`; a file it creates gets mode 600.
     exclusive : bool
-        Lock exclusively, to write, rather than shared, to read.
+        Whether to lock exclusively, to write, rather than shared, to read.
     timeout : float or None, default None
-        Seconds to wait for the lock; None waits as long as it takes.
+        Seconds to wait for the lock before raising `LockTimeoutError`;
+        None waits as long as it takes.
 
     Yields
     ------
@@ -65,7 +64,7 @@ def locked_open(
     Raises
     ------
     LockTimeoutError
-        If the lock is not had within ``timeout`` seconds.
+        If the lock is not acquired within `timeout` seconds.
     """
     deadline = None if timeout is None else time.monotonic() + timeout
     tlock = _thread_lock(path)
@@ -85,7 +84,7 @@ def locked_open(
                     except OSError:  # EACCES or EAGAIN: held elsewhere
                         if time.monotonic() >= deadline:
                             raise LockTimeoutError(
-                                f"{path}: lock not had in {timeout}s"
+                                f"{path}: lock not acquired in {timeout}s"
                             ) from None
                         time.sleep(min(POLL_S, _remaining(deadline)))
             try:

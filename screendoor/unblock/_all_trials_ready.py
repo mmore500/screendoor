@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import typing
 
 from ..churn._fold_trials import fold_trials
@@ -8,14 +6,14 @@ from ..churn._fold_trials import fold_trials
 def all_trials_ready() -> typing.Callable[
     [dict, list[dict], list[dict]], bool
 ]:
-    """Unblock churn once every trial submitted so far has succeeded or
-    failed (or none has been submitted).
+    """Create a `how_unblock_churn` hook that lets churn run once every
+    trial submitted so far has succeeded or failed.
 
     Returns
     -------
     Callable[[dict, list[dict], list[dict]], bool]
-        The ``how_unblock_churn`` hook: ``(ctx, trial_submissions,
-        trial_payloads)`` returns whether no trial is pending.
+        Hook `all_trials_ready(ctx, trial_submissions, trial_payloads)`,
+        returning whether no trial is pending.
     """
 
     def all_trials_ready(

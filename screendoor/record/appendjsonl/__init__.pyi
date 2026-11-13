@@ -1,3 +1,5 @@
+from ._locked_open import LockTimeoutError as LockTimeoutError
+from ._locked_open import locked_open as locked_open
 from ._prep_trial_payloads import prep_trial_payloads as prep_trial_payloads
 from ._read_churn_memo import read_churn_memo as read_churn_memo
 from ._read_churn_notify import read_churn_notify as read_churn_notify

@@ -2,7 +2,7 @@ import json
 import typing
 
 from .... import churn as scd_churn
-from ....auxlib import canonical_json
+from ....auxlib._canonical_json import canonical_json
 from ..._accepted import accepted
 
 
@@ -16,28 +16,27 @@ def churn(
     trial_payloads: list[dict],
     memo: list[dict],
 ) -> list[dict]:
-    """Replay evolution from each timepoint in turn; stop at the first
+    """Replay evolution from each timepoint in turn, stopping at the first
     timepoint from which a replay succeeds.
 
-    ``assay_kwargs``:
+    `assay_kwargs`:
 
-    * ``timepoints``: where replays start (generations, checkpoint paths,
+    * `timepoints`: where replays start (generations, checkpoint paths,
       ...), scanned in the order given.
-    * ``replicates``: replays per timepoint (default 1).
-    * ``cmd`` and ``env``: the replay script, which gets ``$timepoint``
-      (as JSON unless it is a string), ``$timepoint_index`` and
-      ``$replicate``. It succeeds by sending ``true`` or
-      ``{"accept": true, ...}`` as its result; churn raises on a trial
-      with no result.
+    * `replicates`: replays per timepoint (default 1).
+    * `cmd` and `env`: the replay script, which gets `$timepoint` (as JSON
+      unless it is a string), `$timepoint_index` and `$replicate`. It
+      succeeds by sending `true` or `{"accept": true, ...}` as its result;
+      churn raises on a trial with no result.
 
-    Succeeds with the first potentiated ``timepoint`` and its ``index``,
-    or None for both if no replay from any timepoint succeeded, and a
-    ``scanned`` row per timepoint tried.
+    The dispatch succeeds with the first potentiated `timepoint` and its
+    `index`, or None for both if no replay from any timepoint succeeded,
+    and a `scanned` row per timepoint tried.
 
     Parameters
     ----------
     dispatch : dict
-        The dispatch record, with ``assay_kwargs``.
+        The dispatch record, with `assay_kwargs`.
     trial_submissions : list of dict
         The dispatch's trial submissions.
     trial_payloads : list of dict

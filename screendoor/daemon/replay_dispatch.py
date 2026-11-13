@@ -4,23 +4,12 @@ import argparse
 import sys
 
 from ..auxlib._format_cli_description import format_cli_description
+from ._replay_dispatch import replay_dispatch
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run replay_dispatch from the command line.
-
-    Parameters
-    ----------
-    argv : list of str or None, default None
-        The arguments; None for ``sys.argv[1:]``.
-
-    Returns
-    -------
-    int
-        The exit code: 0 if every step matches, else 1.
-    """
-    from ._replay_dispatch import replay_dispatch
-
+    """Run `replay_dispatch` from the command line; return 0 if every step
+    matches, else 1."""
     parser = argparse.ArgumentParser(
         prog="python3 -m screendoor.daemon.replay_dispatch",
         description=format_cli_description(__doc__),

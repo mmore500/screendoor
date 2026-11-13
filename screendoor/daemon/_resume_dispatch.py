@@ -8,20 +8,21 @@ def resume_dispatch(
     """Let the daemon tick killed dispatches again.
 
     Acts on every killed dispatch, or on those whose uuids start with one
-    of ``dispatch_uuids``. Returns the uuids resumed. Start the daemon
+    of `dispatch_uuids`. Resuming does not start a daemon; start one
     afterwards if it has exited.
 
     Parameters
     ----------
     dispatchdir : str
-        The dispatchdir holding the dispatches.
+        Path of the dispatchdir.
     dispatch_uuids : list of str or None, default None
-        Prefixes of the uuids to act on; None or empty for every one.
+        Prefixes of the uuids to act on; None or empty acts on every
+        killed dispatch.
 
     Returns
     -------
     list of str
-        The dispatch_uuids resumed.
+        The `dispatch_uuid` of each dispatch resumed.
 
     Raises
     ------

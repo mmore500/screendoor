@@ -5,12 +5,14 @@ from ..auxlib import _append_jsonl_line
 
 
 class InjectedCrash(BaseException):
-    """Simulated process death; a BaseException, so nothing catches it."""
+    """Simulated process death; a `BaseException`, so that nothing catches
+    it."""
 
 
 @contextlib.contextmanager
 def inject_crash_points(after_n_appends: int) -> typing.Iterator[None]:
-    """Raise InjectedCrash right after the n-th record append in the block.
+    """Raise `InjectedCrash` right after the n-th record append within the
+    block.
 
     Parameters
     ----------
@@ -20,7 +22,7 @@ def inject_crash_points(after_n_appends: int) -> typing.Iterator[None]:
     Raises
     ------
     InjectedCrash
-        Right after the ``after_n_appends``-th append.
+        Right after the `after_n_appends`-th append.
     """
     appends = 0
 

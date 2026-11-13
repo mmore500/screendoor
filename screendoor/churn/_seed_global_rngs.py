@@ -1,30 +1,26 @@
-from __future__ import annotations
-
 import functools
 import hashlib
 import importlib.util
 import random
 import sys
+import types
 import typing
 
 from ..auxlib._canonical_json import canonical_json
 
-if typing.TYPE_CHECKING:
-    import types
-
 
 def churn_seed(meta_seed: int, n_memo: int, n_trial_submissions: int) -> int:
-    """The 32-bit seed for a churn call, from the dispatch's ``meta_seed``
-    and how many memos and trial submissions it has seen so far.
+    """Derive the 32-bit seed of one churn call from the dispatch's
+    `meta_seed` and how many memos and trial submissions churn has seen.
 
     Parameters
     ----------
     meta_seed : int
         The dispatch's seed.
     n_memo : int
-        Memos churn has seen.
+        How many memos churn has seen.
     n_trial_submissions : int
-        Trial submissions churn has seen.
+        How many trial submissions churn has seen.
 
     Returns
     -------
@@ -37,7 +33,7 @@ def churn_seed(meta_seed: int, n_memo: int, n_trial_submissions: int) -> int:
 
 
 def _numpy() -> types.ModuleType | None:
-    """numpy, imported if installed and not yet imported; else None."""
+    """Return numpy if it is installed, importing it if need be."""
     if "numpy" in sys.modules:
         return sys.modules["numpy"]
     if importlib.util.find_spec("numpy") is None:
@@ -52,13 +48,13 @@ def seed_global_rngs(
 ) -> typing.Callable[
     [dict, list[dict], list[dict], list[typing.Any]], list[dict]
 ]:
-    """Wrap an assay's churn so that every call first seeds the global RNGs.
+    """Wrap an assay's churn function so that each call first seeds the
+    global random number generators.
 
-    ``random.seed`` and, if numpy is installed, ``numpy.random.seed`` get
-    churn_seed(meta_seed, len(memo), len(trial_submissions)). The same
-    dispatch state always gives the same draws, so replay_dispatch can
-    reproduce a churn call. ``assay`` is a churn function or a module
-    with one.
+    `random.seed` and, if numpy is installed, `numpy.random.seed` are
+    called with `churn_seed(meta_seed, len(memo), len(trial_submissions))`.
+    The same dispatch state therefore gives the same draws, so that
+    `replay_dispatch` can reproduce a churn call.
 
     In a dispatch, wrap the assay expression in a call::
 
@@ -67,13 +63,13 @@ def seed_global_rngs(
     Parameters
     ----------
     assay : Callable or module
-        A churn function, or a module with one.
+        A churn function, or a module with a `churn` attribute.
 
     Returns
     -------
     Callable[[dict, list[dict], list[dict], list], list[dict]]
-        The churn function, ``(dispatch, trial_submissions, trial_payloads,
-        memo)``: it seeds the global RNGs, then calls the assay's churn.
+        A churn function that seeds the global generators, then calls the
+        assay's churn.
     """
     churn = getattr(assay, "churn", assay)
 

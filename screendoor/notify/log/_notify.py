@@ -1,21 +1,17 @@
-from __future__ import annotations
-
+import datetime
 import logging
 import typing
 
-if typing.TYPE_CHECKING:
-    import datetime
-
 
 def notify() -> typing.Callable[..., list[dict]]:
-    """Log each notification via ``logging``.
+    """Create a notifier that logs each notification through `logging`.
 
     Returns
     -------
-    Callable[..., list]
-        The notifier: ``(ctx, level, message, data, history, now)`` logs
-        ``message``, as a warning at failure, warning and anomaly, and
-        returns a ``sent`` event.
+    Callable[..., list[dict]]
+        Notifier `notify(ctx, level, message, data, history, now)`, which
+        logs `message` (as a warning at the `failure`, `warning` and
+        `anomaly` levels, else as info) and returns a `sent` event.
     """
 
     def notify(

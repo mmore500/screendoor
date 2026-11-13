@@ -1,7 +1,7 @@
-"""Complete, explicit hook sets for tests and simulations.
+"""Complete hook sets for tests and simulations.
 
 screendoor gives no hook a default; these are what the test suite and
-simulate_dispatch supply. A real dispatch spells out its own.
+`simulate_dispatch` supply. A real dispatch spells out its own.
 """
 
 import json
@@ -47,20 +47,20 @@ assert set(DISPATCHDIR_HOOKS) == set(DISPATCHDIR_HOOK_NAMES)
 
 
 def write_dispatchdir_hooks(dispatchdir: str, **overrides: str) -> str:
-    """Write ``<dispatchdir>/dispatch_hooks.json`` with DISPATCHDIR_HOOKS and
-    ``overrides``; return its path.
+    """Write `<dispatchdir>/dispatch_hooks.json` from `DISPATCHDIR_HOOKS`
+    and `overrides`.
 
     Parameters
     ----------
     dispatchdir : str
-        The dispatchdir, made if missing.
+        Path of the dispatchdir, created if missing.
     **overrides : str
-        Hook expressions, by name, set over DISPATCHDIR_HOOKS.
+        Hook expressions, by name, set over `DISPATCHDIR_HOOKS`.
 
     Returns
     -------
     str
-        The path of the ``dispatch_hooks.json`` written.
+        The path of the file written.
     """
     os.makedirs(dispatchdir, exist_ok=True)
     path = os.path.join(dispatchdir, "dispatch_hooks.json")

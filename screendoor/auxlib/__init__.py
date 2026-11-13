@@ -1,4 +1,4 @@
-"""Helpers, one function per file."""
+"""Helpers shared across screendoor's subpackages."""
 
 from ._lazy_attach_stub import lazy_attach_stub
 

@@ -5,23 +5,22 @@ from ._resolve_slot import resolve_slot
 def read(
     path: str, n: int | None = None, slot_bytes: int | None = None
 ) -> dict[int, dict]:
-    """Return ``{index: record}`` for the valid slots.
+    """Read the valid slots of `path`, as `{index: record}`.
 
-    With ``n``, only indices below ``n`` are read. A partial last slot is
-    not valid.
+    A partial last slot is not valid.
 
     Parameters
     ----------
     path : str
         The slotted file.
     n : int or None, default None
-        How many slots to read; None reads them all.
+        How many slots to read, from the first; None reads them all.
     slot_bytes : int or None, default None
         The slot size; None takes the file's own.
 
     Returns
     -------
-    dict of {int : dict}
+    dict of {int: dict}
         Each valid slot's record, by index.
     """
     slot_bytes = resolve_slot(path, slot_bytes)

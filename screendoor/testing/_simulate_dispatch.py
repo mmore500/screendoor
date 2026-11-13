@@ -24,40 +24,39 @@ def simulate_dispatch(
 ) -> dict:
     """Run a whole dispatch on the inline orchestrator in fake time.
 
-    ``assay`` is an expression or a churn function. ``fake_trial(trial) ->
-    result`` stands in for each trial's script (``trial`` has key, env,
-    cmd and attempt); raising fails the trial with kind ``error``.
-    Without it, the scripts really run. The dispatch gets INLINE_HOOKS
-    (progress notices silenced), then ``settings``. A dispatchdir without a
-    ``dispatch_hooks.json`` gets one with DISPATCHDIR_HOOKS.
-
-    To resume an existing ``dispatchdir``, pass ``submit=False`` and, if it
-    holds several dispatches, ``dispatch_uuid``.
+    The dispatch gets `INLINE_HOOKS`, with progress notices silenced, then
+    `settings`. A dispatchdir without a `dispatch_hooks.json` gets one
+    with `DISPATCHDIR_HOOKS`. To resume an existing dispatchdir, pass
+    `submit=False` and, if it holds several dispatches, `dispatch_uuid`.
 
     Parameters
     ----------
     assay : str or Callable
-        The dispatch's ``assay``: an expression or a churn function.
+        The dispatch's `assay`: an expression, or a churn function.
     assay_kwargs : dict or None, default None
-        The dispatch's ``assay_kwargs``.
+        The dispatch's `assay_kwargs`.
     fake_trial : Callable[[dict], Any] or None, default None
-        Stands in for each trial's script, returning its result.
+        A function called as `fake_trial(trial)` in place of each trial's
+        script, returning the trial's result; raising fails the trial.
+        `trial` carries the trial's `key`, `cmd`, `env` and `attempt`.
+        None runs the scripts.
     clock : FakeClock or None, default None
-        The clock to run in, entered here unless already entered; a new
-        one if None.
+        The clock to run in, entered here unless already entered; a new one
+        if None.
     dispatchdir : str or None, default None
-        The dispatchdir; a fresh temporary directory if None.
+        Path of the dispatchdir; a fresh temporary directory if None.
     max_ticks : int, default 100000
         Stop the daemon after this many passes.
     submit : bool, default True
         Whether to submit a new dispatch, rather than resume one.
     **settings
-        Further dispatch fields, set over INLINE_HOOKS.
+        Further dispatch fields, set over `INLINE_HOOKS`.
 
     Returns
     -------
     dict
-        ``{"dispatchdir", "dispatch_uuid", "completed", "trials", "memo"}``.
+        `{"dispatchdir", "dispatch_uuid", "completed", "trials", "memo"}`
+        of the dispatch run.
     """
     clock = clock or FakeClock()
     dispatchdir = dispatchdir or tempfile.mkdtemp(prefix="screendoor-sim-")

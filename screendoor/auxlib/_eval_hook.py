@@ -6,12 +6,12 @@ DEFAULT_EVAL_CONTEXT = (
 
 
 def make_eval_namespace(eval_context: str | None) -> dict:
-    """Exec ``eval_context`` into a fresh namespace.
+    """Execute `eval_context` in a fresh namespace and return it.
 
     Parameters
     ----------
     eval_context : str or None
-        Python statements; None or empty for DEFAULT_EVAL_CONTEXT.
+        Python statements; None or empty runs `DEFAULT_EVAL_CONTEXT`.
 
     Returns
     -------
@@ -24,14 +24,14 @@ def make_eval_namespace(eval_context: str | None) -> dict:
 
 
 def eval_hook(expression: str, namespace: dict) -> typing.Any:
-    """Evaluate one hook (or assay) expression in ``namespace``.
+    """Evaluate a hook or assay expression in `namespace`.
 
     Parameters
     ----------
     expression : str
         A Python expression.
     namespace : dict
-        The globals to evaluate it in, as from make_eval_namespace.
+        The globals to evaluate it in, as from `make_eval_namespace`.
 
     Returns
     -------
@@ -41,7 +41,7 @@ def eval_hook(expression: str, namespace: dict) -> typing.Any:
     Raises
     ------
     TypeError
-        If ``expression`` is not a string.
+        If `expression` is not a string.
     """
     if not isinstance(expression, str):
         raise TypeError(f"hook expression must be a string: {expression!r}")
