@@ -38,7 +38,126 @@ and `replay_dispatch` re-checks every step.
 
 Each trial key is `{"retained": "<sites as ranges>", "replicate": r}` (plus
 `"fresh": n` for audits), so a genotype is never evaluated twice. The
-wildtype reference is launched along with the first batch.
+wildtype's control trials are launched along with the first batch.
+
+## The assay and its controls
+
+Each policy module has a factory, `make_churn(*, num_control_trials=40)`,
+and a `churn` made with the default, so either form works as an assay:
+
+```json
+"assay": "scd.assaylib.skeletonization.hybrid"
+"assay": "scd.churn.seed_global_rngs(scd.assaylib.skeletonization.hybrid.make_churn(num_control_trials=40))"
+```
+
+The wildtype runs `num_control_trials` times (replicates 0 to n-1). These
+control trials measure the wildtype against itself, for example as a
+wildtype-vs-wildtype competition or as a Test CPU score less the
+wildtype's own. Each candidate genotype runs `replicates` times, measured
+against the wildtype the same way, and its scores are judged against the
+controls' distribution by `control_test`:
+
+* `t` (the default with 2 or more controls) is a one-sided t prediction
+  bound. A candidate is rejected if its mean is below
+  `limit - t(1 - alpha, n - 1) * sd * sqrt(1/n + 1/replicates)`, where
+  `limit` is the controls' mean less the tolerance:
+  `mean * (1 - rel_tol) - abs_tol`. This assumes a candidate's noise is
+  the controls'.
+* `rank` is a one-sided exact Mann-Whitney (rank-sum) test of the
+  candidate's replicates, shifted up by the tolerance, against the
+  controls. A candidate is rejected if p <= `alpha`. It makes no
+  assumption about the distribution's shape, but its p-values are coarse:
+  with 40 controls and 1 replicate, the smallest is 1/41 = 0.024. A
+  setting whose smallest p-value is above `alpha` is refused.
+* `mean` (the default with 1 control) accepts if the candidate's mean is
+  at least `limit`. This is the rule from before there were controls.
+
+If every control gives the same score, as Avida's deterministic Test CPU
+does, the standard deviation is 0 and all three tests reject any score
+below it, by more than 1e-12, unless a tolerance allows it.
+
+The summary's `control` gives the test, the number of controls, their mean
+and sd, `alpha`, and the `threshold` for `t` and `mean` (for `rank`, the
+`smallest_pvalue` instead). Results of the `{"accept": bool}` kind are
+judged by `accept_fraction` alone, and the controls are only run.
+
+### Search and sweep rules
+
+A dispatch runs in two phases, the policy's own search and then the sweep
+(the singleton sweep and the final audit), and each phase has a rule:
+`search_rule` and `sweep_rule`. Each rule is one of:
+
+* `detectable_loss` (the default for both): a deletion is accepted unless
+  its scores are clearly below the limit. This is the rule above.
+* `noninferiority`: a deletion is accepted only when its loss is *shown*
+  to be under the margin, `mean * rel_tol + abs_tol`. The margin must
+  then be positive, unless the controls are identical.
+
+`"sweep_rule": null` skips the sweep. With `final_audit`, the search's
+result is still audited, by `search_rule`, and then returned uncertified,
+with status `sweep_skipped`. ddmin and hybrid stop splitting at chunks of
+two and leave the rest to the sweep, so without it they can keep sites
+that a single deletion would remove.
+
+**Screen, then confirm.** If either rule is `noninferiority`, every
+genotype goes through two stages:
+
+1. **Screen.** Replicate 0 alone is tested for a detectable loss at
+   `screen_alpha`. A clearly harmful deletion is rejected after one trial.
+2. **Confirm.** Replicates 1 to `replicates` run next, and are judged by
+   the phase's rule at `alpha`. For `t`, `noninferiority` accepts a mean
+   of at least `limit + t(1 - alpha, n - 1) * sd * sqrt(1/n +
+   1/replicates)`, and `detectable_loss` one of at least `limit - ...` of
+   the same. For `rank`, the replicates are shifted up by the margin;
+   `noninferiority` needs them to rank significantly above the controls,
+   and `detectable_loss` rejects them only if they rank significantly
+   below. The screening replicate is left out of the confirmation. Only
+   genotypes whose first draw looked good get this far, so counting it
+   would bias the mean up.
+
+The intended combination is `"search_rule": "noninferiority"` with the
+default `"sweep_rule": "detectable_loss"`. Every deletion the search
+commits is shown to cost less than the margin, and the sweep then removes
+any remaining site whose loss is not detectable. When the rule changes at
+the sweep, the search forgets its verdicts. They are judged again by the
+sweep's rule from the trials already recorded, at no extra trial cost.
+The reverse combination, a `detectable_loss` search with a
+`noninferiority` sweep, holds the final skeleton to noninferiority
+instead: a skeleton that fails the final audit is rolled back.
+
+A screened candidate costs 1 trial if it is clearly harmful and
+`1 + replicates` otherwise. The summary's `control` gives the `margin`,
+whether there was a `sweep`, and the `stages`: `screen`, `search` and
+`sweep`, each with its rule, alpha, replicates and threshold. For `t`,
+each stage also gives its `harmless_pass_rate`, the chance that a deletion
+with no effect passes it. `verdicts` counts each phase's verdicts, as
+`search_screen_reject`, `search_noninferiority_accept`,
+`sweep_detectable_loss_reject` and so on. For a harmless deletion to pass
+`noninferiority` about 90% of the time with 40 controls at alpha 0.05,
+the margin must be about 3 times the standard error,
+`sd * sqrt(1/40 + 1/replicates)`:
+
+| Margin / control sd | `replicates` |
+|---|---|
+| 3 | 1 to 2 |
+| 2 | 3 |
+| 1 | 12 |
+| 0.5 | about 300 |
+| under 0.47 | none suffice; add controls |
+
+Screening needs scores; `{"accept": bool}` results are refused. With
+identical controls there is no noise, and every rule accepts just a mean
+of at least the limit, so any loss beyond the tolerance is a loss.
+
+Every candidate is measured against the wildtype as a whole, not against
+the genome it was proposed from, so small losses do not add up from step
+to step: a skeleton is accepted only if it passes against the controls
+itself. Each test has its own false-alarm rate, `alpha`, so with
+thousands of tests about that fraction of harmless deletions are wrongly
+kept, and the skeleton comes out somewhat larger than the true minimum.
+A loss smaller than about the t margin above usually goes unnoticed.
+More controls or `replicates` shrink that margin and make room for a
+lower `alpha`.
 
 Given the same `search_seed`, `batch_size` and verdicts, the port takes the
 same path as the original: the same skeleton, proposal batches and
@@ -54,10 +173,15 @@ certificate (checked by `test_matches_2026_11_03_implementation` and
 | `cmd` | required | Trial script |
 | `env` | `{}` | Extra trial environment |
 | `batch_size` | 8 | Candidates per wave (the original's `max_parallel`) |
-| `replicates` | 1 | Trials per genotype; scores are averaged |
+| `replicates` | 1 | Trials per genotype; scores are averaged. With a `noninferiority` rule, the confirmation's trials, after the screen's one |
 | `rel_tol`, `abs_tol` | 0, 0 | Accept if `score >= base*(1-rel_tol) - abs_tol` |
 | `require_atleast` | `[]` | Result list fields that must not drop below wildtype (e.g. `tasks`) |
 | `accept_fraction` | 1.0 | For `{"accept": bool}` results: fraction of replicates needed |
+| `control_test` | `t` (`mean` with 1 control) | `t`, `rank` or `mean`: how scores are judged against the controls |
+| `alpha` | 0.05 | One-sided false-alarm rate for `t` and `rank` |
+| `search_rule` | `detectable_loss` | The search's rule: `detectable_loss` or `noninferiority` (see above) |
+| `sweep_rule` | `detectable_loss` | The sweep's rule, or `null` for no sweep (uncertified, status `sweep_skipped`) |
+| `screen_alpha` | `alpha` | With a `noninferiority` rule, the screen's alpha for a detectable loss on one replicate |
 | `search_seed` | the dispatch's `meta_seed` | Seed of the search's own RNG |
 | `combination_rounds` | 2 | Rounds of union proposals after accepted masks |
 | `final_audit` | true | Re-test the skeleton afresh before certifying it |
@@ -70,7 +194,8 @@ certificate (checked by `test_matches_2026_11_03_implementation` and
 
 Trials receive `env`, then `$retained`, `$knockout` (site ranges such as
 `0-5,9`; decode with `scd.auxlib.decode_sites`), `$n_sites`, `$replicate`
-and, with `sequence`, `$sequence`. A result is `true`/`false`, a number (the
+and, with `sequence`, `$sequence` and `$wildtype`, the unmasked sequence,
+for example to compete against. A result is `true`/`false`, a number (the
 score), an object with `accept`, or an object with `score` and optionally
 `viable` and the `require_atleast` fields. A trial with no result (it
 failed, or sent no `payload`), or a result of another shape or missing a
@@ -113,7 +238,7 @@ settles it.
 5. The largest viable deletion is committed. The common singleton sweep
    and audit then make it single-deletion minimal and certify it.
    The paper stops at step 4 and then hand-picks knock-ins to raise the
-   division rate.
+   division rate; `"sweep_rule": null` stops there too.
 
 Every guess, union and child is tested against the wildtype, not against
 the current genome, and only genotypes that have not been tested yet are

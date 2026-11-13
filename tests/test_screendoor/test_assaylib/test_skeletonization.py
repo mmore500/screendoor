@@ -1,5 +1,7 @@
 import asyncio
+import inspect
 import itertools
+import json
 import os
 import random
 import sys
@@ -116,7 +118,8 @@ def test_rel_tol_and_tasks_and_replicates():
     kept = decode_sites(s["retained"])
     assert {0, 5} <= kept
     assert len(kept) == 12 - 3  # 3% loss allowed, 4% is not
-    assert {t["key"]["replicate"] for t in r["trials"]} == {0, 1}
+    candidates = [t for t in r["trials"] if t["key"]["retained"] != "0-11"]
+    assert {t["key"]["replicate"] for t in candidates} == {0, 1}
 
 
 def test_trial_failure_fails_dispatch():
@@ -156,9 +159,25 @@ def test_first_wave_launches_with_baseline():
     }
     (launch, progress) = skeletonization.hybrid.churn(d, [], [], [])
     keys = [t["key"] for t in launch["kwargs"]["trials"]]
-    assert {"retained": "0-15", "replicate": 0} in keys  # wildtype
-    assert len(keys) == 9
+    wildtype = [k for k in keys if k["retained"] == "0-15"]
+    assert wildtype == [
+        {"retained": "0-15", "replicate": r} for r in range(40)
+    ]
+    assert len(keys) == 8 + 40  # a wave of candidates, and the controls
     assert progress["action"] == "progress"
+    churn = skeletonization.hybrid.make_churn(num_control_trials=3)
+    (launch, _) = churn(d, [], [], [])
+    assert len(launch["kwargs"]["trials"]) == 8 + 3
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_make_churn_takes_a_defaulted_keyword(policy):
+    make_churn = getattr(skeletonization, policy).make_churn
+    (param,) = inspect.signature(make_churn).parameters.values()
+    assert param.name == "num_control_trials" and param.default == 40
+    assert param.kind is param.KEYWORD_ONLY
+    with pytest.raises(ValueError):
+        make_churn(num_control_trials=0)
 
 
 @pytest.mark.skipif(
@@ -398,3 +417,417 @@ def test_gama_dispatch_reports_stages_and_keeps_best_when_out_of_budget():
     assert set(s["stats"]["deleted"]) == {"guess"}
     assert 45 - s["retained_count"] == s["stats"]["deleted"]["guess"] > 1
     assert pred(decode_sites(s["retained"]))
+
+
+# -- judging scores against wildtype-vs-wildtype controls ------------------
+
+from screendoor.assaylib.skeletonization._knockout._controls import (  # noqa: E402
+    control_judge,
+    rank_pvalue,
+    t_cdf,
+    t_quantile,
+)
+
+
+@pytest.mark.parametrize(
+    "p,df,want",
+    [
+        (0.95, 1, 6.3138),
+        (0.95, 39, 1.6849),
+        (0.975, 10, 2.2281),
+        (0.99, 5, 3.3649),
+        (0.05, 39, -1.6849),
+        (0.5, 7, 0.0),
+    ],
+)
+def test_t_quantile_matches_tables(p, df, want):
+    assert t_quantile(p, df) == pytest.approx(want, abs=1e-4)
+    assert t_cdf(t_quantile(p, df), df) == pytest.approx(p, abs=1e-12)
+
+
+def test_rank_pvalue_is_exact():
+    controls = [float(c) for c in range(40)]
+    # one candidate: p = (1 + controls at or below it) / 41
+    assert rank_pvalue([-1.0], controls) == pytest.approx(1 / 41)
+    assert rank_pvalue([9.5], controls) == pytest.approx(11 / 41)
+    assert rank_pvalue([99.0], controls) == 1.0
+    # several: against every ordering of 3 candidates among 5 controls
+    controls = [0.0, 1.0, 2.0, 3.0, 4.0]
+    for scores in ([-1.0, 0.5, 1.5], [0.5, 2.5, 3.5], [-2.0, -1.0, 9.0]):
+        u = sum(c <= x for x in scores for c in controls)
+        us = [
+            sum(sum(c < p for c in range(8) if c not in pos) for p in pos)
+            for pos in itertools.combinations(range(8), 3)
+        ]
+        want = sum(v <= u for v in us) / len(us)
+        assert rank_pvalue(scores, controls) == pytest.approx(want)
+
+
+@pytest.mark.parametrize("test", ["mean", "t", "rank"])
+def test_identical_controls_make_any_loss_a_loss(test):
+    judge, info = control_judge({"control_test": test}, [1.25] * 40, 1)
+    assert info["sd"] == 0
+    assert judge([1.25]) and judge([1.3])
+    assert not judge([1.25 - 1e-9])
+    assert not judge([-5.0])
+
+
+def test_t_threshold_is_a_prediction_bound():
+    controls = [0.9, 1.0, 1.1, 1.0, 0.95, 1.05, 1.0, 1.0]
+    judge, info = control_judge({}, controls, 2)
+    s = info["sd"]
+    bound = 1.0 - t_quantile(0.95, 7) * s * (1 / 8 + 1 / 2) ** 0.5
+    assert info["test"] == "t" and info["threshold"] == pytest.approx(bound)
+    assert judge([bound + 1e-9] * 2) and not judge([bound - 1e-6] * 2)
+    # a tolerance lowers the bound by the margin
+    _, tol = control_judge({"abs_tol": 0.1}, controls, 2)
+    assert tol["threshold"] == pytest.approx(bound - 0.1)
+
+
+def test_rank_test_shifts_by_the_tolerance():
+    controls = [float(c) for c in range(40)]
+    judge, info = control_judge({"control_test": "rank"}, controls, 1)
+    assert not judge([-1.0]) and not judge([0.5])  # p = 1/41, 2/41
+    assert judge([1.5])  # p = 3/41 > 0.05
+    judge, _ = control_judge(
+        {"control_test": "rank", "abs_tol": 2.0}, controls, 1
+    )
+    assert judge([-0.5])  # ranked as 1.5
+
+
+@pytest.mark.parametrize(
+    "kw,controls,reps",
+    [
+        # smallest p is 1/11
+        ({"control_test": "rank"}, [float(c) for c in range(10)], 1),
+        ({"control_test": "t"}, [1.0], 1),
+        ({"control_test": "z"}, [1.0] * 4, 1),
+        ({"alpha": 0}, [1.0] * 4, 1),
+    ],
+)
+def test_control_judge_rejects_bad_settings(kw, controls, reps):
+    with pytest.raises(ValueError):
+        control_judge(kw, controls, reps)
+
+
+def _competition(essential, cost=0.3, sd=0.02):
+    """A fake wildtype competition: the knocked-out essential sites' cost
+    plus noise, reproducible from the trial's key."""
+
+    def fake(t):
+        rng = random.Random(json.dumps(t["key"], sort_keys=True))
+        lost = essential - decode_sites(t["env"]["retained"])
+        return -cost * len(lost) + rng.gauss(0.0, sd)
+
+    return fake
+
+
+@pytest.mark.parametrize("test", ["t", "rank"])
+@pytest.mark.parametrize("policy", POLICIES)
+def test_noisy_scores_judged_against_controls(policy, test):
+    essential = frozenset({0, 1, 2, 10, 44})
+    r = simulate_dispatch(
+        f"scd.assaylib.skeletonization.{policy}",  # 40 controls by default
+        _kwargs(policy, 45, batch_size=8, search_seed=3, control_test=test),
+        fake_trial=_competition(essential),
+    )
+    s = r["completed"]["summary"]
+    assert r["completed"]["outcome"] == "succeeded", r["completed"]
+    kept = decode_sites(s["retained"])
+    assert essential <= kept and s["certified"]
+    assert len(kept) <= len(essential) + 3  # a few false alarms at 5%
+    control = s["control"]
+    assert control["test"] == test and control["n"] == 40
+    assert abs(control["mean"]) < 0.02 and 0.01 < control["sd"] < 0.03
+    if test == "t":
+        assert -0.07 < control["threshold"] < -0.02
+    wildtype = [
+        t["key"]["replicate"]
+        for t in r["trials"]
+        if t["key"]["retained"] == "0-44" and "fresh" not in t["key"]
+    ]
+    assert sorted(wildtype) == list(range(40))
+    # all 40 controls go out with the first wave's candidates
+    d = {"assay_kwargs": _kwargs(policy, 45), "meta_seed": 3}
+    launch, _ = getattr(skeletonization, policy).churn(d, [], [], [])
+    keys = [t["key"] for t in launch["kwargs"]["trials"]]
+    assert sum(k["retained"] == "0-44" for k in keys) == 40
+    assert 40 < len(keys) <= 40 + 8  # ddmin's first wave is two halves
+
+
+def test_one_control_is_the_mean_rule():
+    """With one control, the wildtype's score less the tolerance is the
+    threshold. Controls and candidate replicates are counted apart."""
+    churn = (
+        "scd.assaylib.skeletonization.ddmin.make_churn(num_control_trials=1)"
+    )
+    r = simulate_dispatch(
+        churn,
+        {"n_sites": 8, "cmd": "x", "replicates": 2},
+        fake_trial=lambda t: {
+            "accept": 2 in decode_sites(t["env"]["retained"])
+        },
+    )
+    s = r["completed"]["summary"]
+    wildtype = [t for t in r["trials"] if t["key"]["retained"] == "0-7"]
+    assert len(wildtype) == 1 and "control" not in s  # accept results
+    assert {t["key"]["replicate"] for t in r["trials"]} == {0, 1}
+    r = simulate_dispatch(
+        churn,
+        {"n_sites": 8, "cmd": "x", "rel_tol": 0.1},
+        fake_trial=lambda t: float(2 in decode_sites(t["env"]["retained"])),
+    )
+    assert r["completed"]["summary"]["control"] == {
+        "test": "mean",
+        "n": 1,
+        "mean": 1.0,
+        "threshold": 0.9,
+    }
+
+
+def test_trials_get_the_wildtype_sequence():
+    seen = set()
+
+    def fake(t):
+        seen.add(t["env"]["wildtype"])
+        return {"accept": "c" in t["env"]["sequence"]}
+
+    simulate_dispatch(
+        "scd.assaylib.skeletonization.ddmin",
+        {"sequence": "abcd", "cmd": "x"},
+        fake_trial=fake,
+    )
+    assert seen == {"abcd"}
+
+
+# -- noninferiority: screen on one replicate, then confirm -----------------
+
+from screendoor.assaylib.skeletonization._knockout._controls import (  # noqa: E402
+    Controls,
+)
+
+
+def test_rank_upper_pvalue_is_exact():
+    controls = [0.0, 1.0, 2.0, 3.0, 4.0]
+    for scores in ([4.5, 3.5, 9.0], [0.5, 2.5, 3.5], [-2.0, -1.0, 9.0]):
+        u = sum(c < x for x in scores for c in controls)
+        us = [
+            sum(sum(c < p for c in range(8) if c not in pos) for p in pos)
+            for pos in itertools.combinations(range(8), 3)
+        ]
+        want = sum(v >= u for v in us) / len(us)
+        assert rank_pvalue(scores, controls, upper=True) == pytest.approx(want)
+    # one candidate above all 40 controls: p = 1/41
+    assert rank_pvalue([99.0], list(map(float, range(40))), upper=True) == (
+        pytest.approx(1 / 41)
+    )
+
+
+def test_noninferior_and_loss_bounds_mirror_each_other():
+    scores = [0.01 * (-1) ** r for r in range(40)]
+    c = Controls({"abs_tol": 0.03}, scores)
+    q = t_quantile(0.95, 39) * c.se(4)
+    assert c.threshold("detectable_loss", 0.05, 4) == pytest.approx(-0.03 - q)
+    assert c.threshold("noninferiority", 0.05, 4) == pytest.approx(-0.03 + q)
+    assert c.accepts([-0.02] * 4, "noninferiority", 0.05)
+    assert not c.accepts([-0.025] * 4, "noninferiority", 0.05)
+    assert c.accepts([-0.035] * 4, "detectable_loss", 0.05)
+    # rank: shifted up by the margin, then shown to beat the controls
+    r = Controls({"abs_tol": 0.03, "control_test": "rank"}, scores)
+    assert r.accepts([0.02] * 4, "noninferiority", 0.05)
+    assert not r.accepts([-0.03] * 4, "noninferiority", 0.05)
+    assert r.accepts([-0.03] * 4, "detectable_loss", 0.05)
+    # identical controls: no noise, so every rule is "at least the limit"
+    flat = Controls({}, [0.0] * 40)
+    for rule in ("detectable_loss", "noninferiority"):
+        assert flat.accepts([0.0], rule, 0.05)
+        assert not flat.accepts([-1e-9], rule, 0.05)
+
+
+def _parity(costs):
+    """A fake competition: a genotype's summed cost, plus +0.01 on even
+    replicates and -0.01 on odd ones, so controls have mean 0 and sd 0.0101,
+    a screen (replicate 0) reads cost - 0.01 high, and 4 confirmations
+    average to exactly -cost."""
+
+    def fake(t):
+        kept = decode_sites(t["env"]["retained"])
+        cost = sum(c for i, c in costs.items() if i not in kept)
+        return -cost + (0.01 if t["key"]["replicate"] % 2 == 0 else -0.01)
+
+    return fake
+
+
+NONINFERIOR = {
+    "search_rule": "noninferiority",
+    "abs_tol": 0.03,
+    "replicates": 4,
+    "batch_size": 8,
+    "search_seed": 5,
+}
+# essential sites fail the screen; each mild one (0.03) fails the
+# noninferiority confirmation (accepts up to 0.021) but passes the sweep's
+# pass's loss confirmation (accepts up to 0.039); two mild ones (0.06)
+# fail the screen (rejects above 0.057)
+COSTS = {0: 0.5, 1: 0.5, 5: 0.03, 6: 0.03}
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_noninferiority_search_then_detectable_loss_sweep(policy):
+    r = simulate_dispatch(
+        f"scd.assaylib.skeletonization.{policy}",
+        _kwargs(policy, 12, **NONINFERIOR),
+        fake_trial=_parity(COSTS),
+    )
+    assert r["completed"]["outcome"] == "succeeded", r["completed"]
+    s = r["completed"]["summary"]
+    kept = decode_sites(s["retained"])
+    assert s["certified"]
+    # the search keeps both mild sites; the final pass drops one of them
+    assert len(kept) == 3 and {0, 1} <= kept and len(kept & {5, 6}) == 1
+    control = s["control"]
+    assert control["margin"] == pytest.approx(0.03)
+    stages = control["stages"]
+    assert stages["screen"]["threshold"] == pytest.approx(-0.04728, abs=1e-4)
+    assert stages["search"]["rule"] == "noninferiority"
+    assert stages["search"]["threshold"] == pytest.approx(-0.02105, abs=1e-4)
+    assert stages["sweep"]["rule"] == "detectable_loss"
+    assert stages["sweep"]["threshold"] == pytest.approx(-0.03895, abs=1e-4)
+    assert all(st["harmless_pass_rate"] > 0.99 for st in stages.values())
+    tally = control["verdicts"]
+    assert tally["search_screen_reject"] > 0
+    assert tally["search_noninferiority_accept"] > 0
+    assert tally["search_noninferiority_reject"] > 0
+    assert tally["sweep_detectable_loss_accept"] >= 1
+    # a screened-out genotype ran once; one that passed ran 1 + 4 times
+    by_genotype = {}
+    for t in r["trials"]:
+        k = t["key"]
+        g = (k["retained"], k.get("fresh", 0))
+        by_genotype.setdefault(g, set()).add(k["replicate"])
+    for (retained, _), reps in by_genotype.items():
+        if retained == "0-11":
+            continue  # the controls
+        lost = sum(COSTS.get(i, 0) for i in range(12)) - sum(
+            COSTS.get(i, 0) for i in decode_sites(retained)
+        )
+        assert reps == ({0} if lost > 0.0573 else {0, 1, 2, 3, 4}), retained
+
+
+@pytest.mark.parametrize("policy", ["ddmin", "gama"])
+def test_noninferiority_throughout(policy):
+    r = simulate_dispatch(
+        f"scd.assaylib.skeletonization.{policy}",
+        _kwargs(policy, 12, sweep_rule="noninferiority", **NONINFERIOR),
+        fake_trial=_parity(COSTS),
+    )
+    s = r["completed"]["summary"]
+    assert decode_sites(s["retained"]) == {0, 1, 5, 6} and s["certified"]
+    assert s["control"]["stages"]["sweep"]["rule"] == "noninferiority"
+    assert not any("detectable" in k for k in s["control"]["verdicts"])
+
+
+def test_noninferiority_with_identical_controls_counts_any_loss():
+    costs = {0: 0.5, 3: 1e-6}  # site 3's loss is tiny, but real
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.ddmin",
+        {
+            "n_sites": 8,
+            "cmd": "x",
+            "search_rule": "noninferiority",
+            "replicates": 2,
+        },
+        fake_trial=lambda t: -sum(
+            c
+            for i, c in costs.items()
+            if i not in decode_sites(t["env"]["retained"])
+        ),
+    )
+    s = r["completed"]["summary"]
+    assert decode_sites(s["retained"]) == {0, 3}
+    assert s["control"]["sd"] == 0
+    assert s["control"]["stages"]["search"]["harmless_pass_rate"] == 1
+
+
+@pytest.mark.parametrize(
+    "kw,fake,reason",
+    [
+        ({}, _parity({0: 0.5}), "needs a margin"),
+        ({"abs_tol": 0.03}, lambda t: {"accept": True}, "needs scores"),
+        ({"abs_tol": 0.03, "sweep_rule": "maybe"}, _parity({}), "one of"),
+        ({"abs_tol": 0.03, "search_rule": None}, _parity({}), "one of"),
+    ],
+)
+def test_noninferiority_refuses_bad_settings(kw, fake, reason):
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.ddmin",
+        {"n_sites": 8, "cmd": "x", "search_rule": "noninferiority", **kw},
+        fake_trial=fake,
+        churn_maxretry=0,
+    )
+    assert r["completed"]["outcome"] == "failed"
+    assert reason in r["completed"]["reason"]
+
+
+@pytest.mark.parametrize("final_audit", [True, False])
+@pytest.mark.parametrize("policy", POLICIES)
+def test_null_sweep_rule_skips_the_sweep(policy, final_audit):
+    r = simulate_dispatch(
+        f"scd.assaylib.skeletonization.{policy}",
+        _kwargs(
+            policy,
+            12,
+            sweep_rule=None,
+            final_audit=final_audit,
+            **NONINFERIOR,
+        ),
+        fake_trial=_parity(COSTS),
+    )
+    s = r["completed"]["summary"]
+    assert r["completed"]["outcome"] == "succeeded"
+    assert not s["certified"] and s["status"] == "sweep_skipped"
+    kept = decode_sites(s["retained"])
+    assert {0, 1, 5, 6} <= kept  # noninferiority alone keeps the mild sites
+    if policy in ("minesweeper", "gama"):  # they screen single sites
+        assert kept == {0, 1, 5, 6}
+    else:  # ddmin stops at chunks of two, leaving the rest to the sweep
+        assert len(kept) > 4
+    control = s["control"]
+    assert not control["sweep"] and "sweep" not in control["stages"]
+    # the final audit alone, by the search's rule
+    audited = any("fresh" in t["key"] for t in r["trials"])
+    assert audited == final_audit
+    sweep = {k for k in control["verdicts"] if k.startswith("sweep_")}
+    assert sweep == ({"sweep_noninferiority_accept"} if final_audit else set())
+    assert all(t["reason"] != "certified_proposal" for t in s["transitions"])
+
+
+def test_gama_without_sweep_stops_after_mate():
+    pred = _pred(frozenset({0, 1, 2, 10, 44}))
+    search = _gama(45, seed=3, sweep=False)
+    result, waves = _drive(search, pred)
+    assert result["status"] == "sweep_skipped"
+    assert [t[3] for t in result["transitions"]] == ["gama"]
+    assert len(result["retained"]) == 45 - search.stats["deleted"]["mate"]
+
+
+@pytest.mark.parametrize("policy", POLICIES)
+def test_detectable_loss_search_then_noninferiority_sweep(policy):
+    """The search commits a mild deletion; the sweep's noninferiority
+    audit rejects that skeleton, rolls it back, and keeps both mild sites."""
+    kw = {
+        **NONINFERIOR,
+        "search_rule": "detectable_loss",
+        "sweep_rule": "noninferiority",
+    }
+    r = simulate_dispatch(
+        f"scd.assaylib.skeletonization.{policy}",
+        _kwargs(policy, 12, **kw),
+        fake_trial=_parity(COSTS),
+    )
+    s = r["completed"]["summary"]
+    assert decode_sites(s["retained"]) == {0, 1, 5, 6} and s["certified"]
+    assert s["rollbacks"] == 1
+    tally = s["control"]["verdicts"]
+    assert tally["search_detectable_loss_accept"] > 0
+    assert tally["sweep_noninferiority_reject"] > 0

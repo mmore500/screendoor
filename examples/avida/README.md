@@ -18,6 +18,9 @@ python3 -m screendoor.daemon.run_busyloop --dispatchdir work
 ```
 
 The organism is a name in `organisms.json`, or `seq:<genome>`.
+`--num-control-trials N` (default 40) sets how many wildtype controls
+scores are judged against. The Test CPU is deterministic, so these all
+agree, and any loss in fitness beyond `--rel-tol` is a loss.
 `--policy` is `ddmin`, `minesweeper`, `hybrid` or `gama`. `--assay-kwargs
 JSON` adds more assay_kwargs. GAMA's defaults are the paper's
 cluster-scale population sizes, so smaller ones are a good idea here:

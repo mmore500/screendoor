@@ -12,7 +12,7 @@ from .._knockout import (
     ACCEPT,
     KnockoutSearch,
     accepted_sites,
-    search_churn,
+    make_search_churn,
     singletons,
     split,
 )
@@ -219,8 +219,13 @@ class GamaSearch(KnockoutSearch):
         return frozenset(child)
 
 
-def churn(dispatch, trial_submissions, trial_payloads, memo):
-    """Skeletonize by GAMA, the Guess/Add/Mate genetic algorithm. See docs/skeletonization.md."""
-    return search_churn(
-        GamaSearch, dispatch, trial_submissions, trial_payloads
-    )
+def make_churn(*, num_control_trials: int = 40):
+    """Skeletonize by GAMA, the Guess/Add/Mate genetic algorithm.
+
+    The wildtype runs ``num_control_trials`` times, as the controls every
+    genotype's scores are judged against. See docs/skeletonization.md.
+    """
+    return make_search_churn(GamaSearch, num_control_trials=num_control_trials)
+
+
+churn = make_churn()

@@ -9,8 +9,11 @@ give the same trajectory. A genotype is the frozenset of retained sites; a
 mask is a set of sites to delete from the current genotype.
 
 Subclasses give the policy as ``search()``, a generator returning pass,
-unresolved, recovered or exhausted_recovery; ``run()`` then sweeps
-singletons until no single deletion passes.
+unresolved, recovered or exhausted_recovery; ``run()`` then makes the
+sweep: it tries single deletions until none passes, and audits. Each wave
+says whether it is in the ``sweep``, so the verdicts there may follow
+another rule; with ``rejudge_at_sweep``, the search then forgets
+its rejections, to have them judged again.
 """
 
 import math
@@ -40,6 +43,8 @@ class KnockoutSearch:
         initial_knockout_size=None,
         context_decay: float = 4.0,
         memory_strength: float = 4.0,
+        rejudge_at_sweep: bool = False,
+        sweep: bool = True,
     ):
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
@@ -65,6 +70,9 @@ class KnockoutSearch:
         self.commits_since_audit = 0
         self.stopped = ""  # why the search gave up, if it did
         self.phase = "start"
+        self.sweeping = False  # in the sweep, or the audit after search()
+        self.rejudge_at_sweep = rejudge_at_sweep
+        self.sweep = sweep
         self.stats: dict = {}  # a policy's own figures, for the summary
 
     # -- evaluation ------------------------------------------------------
@@ -87,7 +95,11 @@ class KnockoutSearch:
             if fresh:
                 self.fresh_count += 1
                 tag = self.fresh_count
-            got = yield {"genotypes": batch, "fresh": tag}
+            got = yield {
+                "genotypes": batch,
+                "fresh": tag,
+                "sweep": self.sweeping,
+            }
             for s in batch:
                 self.cache[s] = result[s] = got[s]
             if stop_after_accept and ACCEPT in result.values():
@@ -279,12 +291,23 @@ class KnockoutSearch:
         }
 
     def run(self):
-        """Generator: run ``search()``, then singleton sweeps until no single
-        deletion passes. Returns the result dict (``StopIteration.value``).
+        """Generator: run ``search()``, then (unless ``sweep`` is false)
+        singleton sweeps until no single deletion passes, and the final
+        audit. Returns the result dict (``StopIteration.value``).
         """
         status = yield from self.search()
         if status in ("unresolved", "exhausted_recovery"):
             return self.result(False, status)
+        self.sweeping = True
+        if self.rejudge_at_sweep:  # judge it all again, by the sweep's rule
+            self.cache.clear()
+            self.memory.forget_rejections()
+        if not self.sweep:  # so nothing certifies it minimal
+            if self.final_audit and self.current != self.original:
+                status = yield from self.audit()
+                if status not in ("pass", "recovered"):
+                    return self.result(False, "audit_" + status)
+            return self.result(False, "sweep_skipped")
         while True:
             if self.stopped:
                 return self.result(False, self.stopped)

@@ -54,6 +54,10 @@ class ProposalMemory:
             # a rejected union never erases its accepted components
             self._rejected.add((parent, mask))
 
+    def forget_rejections(self) -> None:
+        """Forget every rejection, for verdicts under a new rule."""
+        self._rejected.clear()
+
     def rejected_here(self, parent: frozenset, mask: frozenset) -> bool:
         """Whether deleting ``mask`` from ``parent`` was rejected.
 

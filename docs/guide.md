@@ -61,6 +61,14 @@ uses to re-run each churn call from the state it saw.
 | `scd.assaylib.skeletonization.hybrid` | Multi-dose pilot, then top-down ddmin or bottom-up sieve |
 | `scd.assaylib.skeletonization.gama` | Guess/Add/Mate genetic algorithm (Rees-Garbutt 2020) |
 
+Each skeletonization module also has `make_churn(*,
+num_control_trials=40)`. The wildtype runs that many times as controls,
+and candidate scores are judged against their distribution by a t
+prediction bound or a rank test. `search_rule` and `sweep_rule` choose,
+for the search and for the final sweep, whether a deletion must show no
+detectable loss or be shown noninferior; `"sweep_rule": null` skips the
+sweep.
+
 Each assay's docstring lists its kwargs (for the skeletonization
 strategies, see docs/skeletonization.md). Pass/fail results are `true` or
 `{"accept": true}` (`scd.assaylib.accepted`); a trial with no result makes

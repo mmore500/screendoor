@@ -1,6 +1,6 @@
 import typing
 
-from .._knockout import ACCEPT, KnockoutSearch, search_churn, split
+from .._knockout import ACCEPT, KnockoutSearch, make_search_churn, split
 
 
 class DdminSearch(KnockoutSearch):
@@ -86,32 +86,28 @@ class DdminSearch(KnockoutSearch):
         return "pass"
 
 
-def churn(
-    dispatch: dict,
-    trial_submissions: list[dict],
-    trial_payloads: list[dict],
-    memo: list[dict],
-) -> list[dict]:
+def make_churn(
+    *, num_control_trials: int = 40
+) -> typing.Callable[[dict, list[dict], list[dict], list[dict]], list[dict]]:
     """Skeletonize by parallel partition-union delta debugging.
 
     See docs/skeletonization.md.
 
     Parameters
     ----------
-    dispatch : dict
-        The dispatch record, with ``assay_kwargs``.
-    trial_submissions : list of dict
-        The dispatch's trial submissions.
-    trial_payloads : list of dict
-        The dispatch's trial payloads.
-    memo : list of dict
-        Unused: the search is replayed from the trials.
+    num_control_trials : int, default 40
+        How many times the wildtype runs, as the controls every genotype's
+        scores are judged against.
 
     Returns
     -------
-    list of dict
-        This step's actions.
+    Callable
+        The churn function, ``churn(dispatch, trial_submissions,
+        trial_payloads, memo) -> actions``.
     """
-    return search_churn(
-        DdminSearch, dispatch, trial_submissions, trial_payloads
+    return make_search_churn(
+        DdminSearch, num_control_trials=num_control_trials
     )
+
+
+churn = make_churn()

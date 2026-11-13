@@ -52,6 +52,7 @@ def make_dispatch(
     max_procs: int = 8,
     trial_batchsize: int = 1,
     assay_kwargs: dict | None = None,
+    num_control_trials: int = 40,
 ) -> dict:
     with open(os.path.join(HERE, "organisms.json")) as fh:
         organisms = json.load(fh)
@@ -89,7 +90,8 @@ def make_dispatch(
         "meta_user": subprocess.check_output(["id", "-un"], text=True).strip(),
         "meta_redo": "0",
         "assay": "scd.churn.seed_global_rngs("
-        f"scd.assaylib.skeletonization.{policy})",
+        f"scd.assaylib.skeletonization.{policy}.make_churn("
+        f"num_control_trials={int(num_control_trials)}))",
         "assay_kwargs": kwargs,
         "schedule": schedule,
         "trial_batchsize": trial_batchsize,
@@ -151,6 +153,13 @@ def main() -> int:
         metavar="JSON",
         help="more assay_kwargs, e.g. '{\"mate_children\": 64}' for gama",
     )
+    p.add_argument(
+        "--num-control-trials",
+        type=int,
+        default=40,
+        help="wildtype trials the scores are judged against (the Test "
+        "CPU is deterministic, so these all agree and any loss counts)",
+    )
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--rel-tol", type=float, default=0.02)
     p.add_argument("--search-seed", type=int, default=None)
@@ -175,6 +184,7 @@ def main() -> int:
             max_procs=a.max_procs,
             trial_batchsize=a.trial_batchsize,
             assay_kwargs=a.assay_kwargs,
+            num_control_trials=a.num_control_trials,
         )
     except KeyError as e:
         p.error(e.args[0])

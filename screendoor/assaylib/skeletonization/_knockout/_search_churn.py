@@ -4,11 +4,24 @@ Every tick replays the search from the start, feeding it verdicts computed
 from recorded trials, until it asks about a genotype whose trials are not
 all in. Churn launches the missing ones and returns. Nothing is memoized:
 the trial records are the state.
+
+Each phase has a rule: ``search_rule`` while the policy searches, and
+``sweep_rule`` in the sweep and final audit after it (None: no sweep).
+Either is ``detectable_loss`` (reject only a detectable loss) or
+``noninferiority`` (accept only a loss shown to be within the margin).
+If either is ``noninferiority``, a genotype's verdict comes in two
+stages: its replicate 0 screens it, rejecting a detectable loss, and
+replicates 1 to ``replicates`` then confirm it by its phase's rule.
 """
+
+from collections import Counter
+import math
+from statistics import NormalDist
 
 from .... import churn as scd_churn
 from ....auxlib import canonical_json
 from ....auxlib._encode_sites import encode_sites
+from ._controls import RULES, Controls, t_quantile
 from ._masks import ACCEPT, REJECT
 
 SEARCH_KWARGS = (
@@ -47,6 +60,7 @@ def _trial_env(kw: dict, n: int, g: frozenset, rep: int) -> dict:
     }
     if "sequence" in kw:
         env["sequence"] = _masked_sequence(kw, g)
+        env["wildtype"] = kw["sequence"]  # e.g. to compete against
     return env
 
 
@@ -62,10 +76,16 @@ def _as_dict(result) -> dict:
     )
 
 
-def _verdict(kw: dict, results: list, baseline: list) -> str:
-    """Accept or reject a genotype from its replicates' results."""
+def _verdict(
+    kw: dict, results: list, baseline: list, judge, *, scores_only=False
+) -> str:
+    """Accept or reject a genotype from its replicates' results, given the
+    wildtype controls' (``baseline``). ``judge(scores)`` judges the
+    replicates' scores; ``scores_only`` refuses ``accept`` results."""
     rs = [_as_dict(r) for r in results]
     baseline = [_as_dict(b) for b in baseline]
+    if scores_only and any("accept" in r for r in rs):
+        raise ValueError("noninferiority needs scores, not accept results")
     if any("accept" in r for r in rs):
         if not all("accept" in r for r in rs):
             raise ValueError("some results have 'accept' and some do not")
@@ -88,13 +108,10 @@ def _verdict(kw: dict, results: list, baseline: list) -> str:
                 )
             if any(g < w for g, w in zip(r[field], want)):
                 return REJECT
-    score = sum(float(r["score"]) for r in rs) / len(rs)
-    base = sum(float(b["score"]) for b in baseline) / len(baseline)
-    threshold = base * (1.0 - kw.get("rel_tol", 0.0)) - kw.get("abs_tol", 0.0)
-    return ACCEPT if score >= threshold - 1e-12 else REJECT
+    return ACCEPT if judge([float(r["score"]) for r in rs]) else REJECT
 
 
-def _summary(kw, search, result, n, trials, waves) -> dict:
+def _summary(kw, search, result, n, trials, waves, control) -> dict:
     retained = result["retained"]
     summary = {
         "policy": search.policy,
@@ -121,12 +138,87 @@ def _summary(kw, search, result, n, trials, waves) -> dict:
         summary["unresolved"] = result["unresolved"]
     if search.stats:
         summary["stats"] = search.stats
+    if control:
+        summary["control"] = control
     if "sequence" in kw:
         summary["skeleton"] = _masked_sequence(kw, retained)
     return summary
 
 
-def search_churn(search_class, dispatch, trial_submissions, trial_payloads):
+def make_search_churn(search_class, *, num_control_trials: int):
+    """A churn function for ``search_class`` (a KnockoutSearch) whose
+    wildtype runs ``num_control_trials`` times, as the controls every
+    genotype's scores are judged against."""
+    if int(num_control_trials) < 1:
+        raise ValueError("num_control_trials must be positive")
+
+    def churn(dispatch, trial_submissions, trial_payloads, memo):
+        return search_churn(
+            search_class,
+            dispatch,
+            trial_submissions,
+            trial_payloads,
+            num_control_trials=int(num_control_trials),
+        )
+
+    return churn
+
+
+def _pass_rate(c, rule: str, alpha: float, replicates: int):
+    """For ``t``: the chance a harmless deletion (scoring like the
+    controls) passes ``rule``; None for ``rank``."""
+    if c.flat:
+        return 1.0
+    if c.test != "t":
+        return None
+    q = t_quantile(1.0 - alpha, c.n - 1)
+    sign = 1.0 if rule == "detectable_loss" else -1.0
+    return NormalDist().cdf(c.margin / c.se(replicates) + sign * q)
+
+
+def _control_summary(c, kw, reps, rules: dict, tally: Counter) -> dict:
+    """The controls, and each stage's rule, alpha and threshold."""
+    info = c.summary()
+    if not rules["sequential"]:
+        alpha = rules["alpha"]
+        if c.test != "mean":
+            info["alpha"] = alpha
+        threshold = c.threshold("detectable_loss", alpha, reps)
+        if threshold is None:
+            info["smallest_pvalue"] = 1.0 / math.comb(c.n + reps, reps)
+        else:
+            info["threshold"] = threshold
+        return info
+    stages = {
+        "screen": ("detectable_loss", rules["screen_alpha"], 1),
+        "search": (rules["search_rule"], rules["alpha"], reps),
+    }
+    if rules["sweep_rule"] is not None:
+        stages["sweep"] = (rules["sweep_rule"], rules["alpha"], reps)
+    info["margin"] = c.margin
+    info["stages"] = {
+        name: {
+            "rule": rule,
+            "alpha": alpha,
+            "replicates": r,
+            "threshold": c.threshold(rule, alpha, r),
+            "harmless_pass_rate": _pass_rate(c, rule, alpha, r),
+        }
+        for name, (rule, alpha, r) in stages.items()
+    }
+    info["sweep"] = rules["sweep_rule"] is not None
+    info["verdicts"] = dict(sorted(tally.items()))
+    return info
+
+
+def search_churn(
+    search_class,
+    dispatch,
+    trial_submissions,
+    trial_payloads,
+    *,
+    num_control_trials: int,
+):
     """What churn should do next, by replaying ``search_class`` (a
     KnockoutSearch) over the recorded trials: launch the next wave's
     missing trials, or succeed with the search's result."""
@@ -134,12 +226,34 @@ def search_churn(search_class, dispatch, trial_submissions, trial_payloads):
     kw = dispatch["assay_kwargs"]
     n = len(kw["sequence"]) if "sequence" in kw else int(kw["n_sites"])
     reps = int(kw.get("replicates", 1))
+    if reps < 1:
+        raise ValueError("replicates must be positive")
+    alpha = float(kw.get("alpha", 0.05))
+    rules = {
+        "search_rule": kw.get("search_rule", "detectable_loss"),
+        "sweep_rule": kw.get("sweep_rule", "detectable_loss"),
+        "alpha": alpha,
+        "screen_alpha": float(kw.get("screen_alpha", alpha)),
+    }
+    if rules["search_rule"] not in RULES:
+        raise ValueError(f"search_rule must be one of {RULES}")
+    if rules["sweep_rule"] not in (*RULES, None):
+        raise ValueError(f"sweep_rule must be one of {RULES} or null")
+    # with noninferiority anywhere, every genotype is screened, then
+    # confirmed: one trial key layout for the whole dispatch
+    rules["sequential"] = sequential = "noninferiority" in (
+        rules["search_rule"],
+        rules["sweep_rule"],
+    )
     # the search's own Random, replayed every tick: never the global one
     seed = kw.get("search_seed", dispatch["meta_seed"])
     search = search_class(
         range(n),
         batch_size=int(kw.get("batch_size", 8)),
         seed=seed,
+        sweep=rules["sweep_rule"] is not None,
+        rejudge_at_sweep=rules["sweep_rule"]
+        not in (None, rules["search_rule"]),
         **{
             k: kw[k]
             for k in (*SEARCH_KWARGS, *search_class.policy_kwargs)
@@ -148,15 +262,74 @@ def search_churn(search_class, dispatch, trial_submissions, trial_payloads):
     )
     wildtype = search.original
     by_key = {canonical_json(t["key"]): t for t in trials}
+    missing, waiting = {}, 0  # the wave's trials yet to launch, or run
 
-    def lookup(g, fresh) -> dict:
-        """Each replicate's trial key -> its trial, or None."""
-        keys = [_trial_key(g, rep, fresh) for rep in range(reps)]
-        return {canonical_json(k): by_key.get(canonical_json(k)) for k in keys}
+    def need(g, fresh, replicates):
+        """The results of ``g``'s ``replicates``, or None, noting the
+        trials missing or still running."""
+        nonlocal waiting
+        found = []
+        for rep in replicates:
+            key = _trial_key(g, rep, fresh)
+            t = by_key.get(canonical_json(key))
+            if t is None:
+                missing[canonical_json(key)] = {
+                    "key": key,
+                    "cmd": kw["cmd"],
+                    "env": _trial_env(kw, n, g, rep),
+                }
+            elif t["state"] == "pending":
+                waiting += 1
+            else:
+                found.append(t)
+        if len(found) < len(replicates):
+            return None
+        return [scd_churn.trial_result(t) for t in found]
 
-    def results_of(g, fresh) -> list:
-        """The replicates' results."""
-        return [scd_churn.trial_result(t) for t in lookup(g, fresh).values()]
+    made = []  # the Controls, once a score is first judged
+    tally = Counter()  # screened and confirmed verdicts, by phase
+
+    def controls(baseline) -> Controls:
+        if not made:
+            scores = []
+            for r in map(_as_dict, baseline):
+                if "score" not in r:
+                    raise ValueError(f"trial result lacks ['score']: {r!r}")
+                scores.append(float(r["score"]))
+            c = Controls(kw, scores)
+            if sequential and not c.flat and c.margin <= 0:
+                raise ValueError(
+                    "noninferiority needs a margin: set rel_tol or abs_tol"
+                )
+            # refuse settings no candidate could pass, before judging one
+            _control_summary(c, kw, reps, rules, tally)
+            made.append(c)
+        return made[0]
+
+    def judge(baseline, rule: str, alpha: float):
+        return lambda scores: controls(baseline).accepts(scores, rule, alpha)
+
+    def screen_then_confirm(g, fresh, sweeping, baseline):
+        """Screen ``g`` on replicate 0; if it passes, confirm it on
+        replicates 1 to ``replicates``. None until its trials are in."""
+        phase = "sweep" if sweeping else "search"
+        first = need(g, fresh, [0])
+        if first is None or baseline is None:
+            return None
+        screen = judge(baseline, "detectable_loss", rules["screen_alpha"])
+        if _verdict(kw, first, baseline, screen, scores_only=True) == REJECT:
+            tally[f"{phase}_screen_reject"] += 1
+            return REJECT
+        rest = need(g, fresh, range(1, reps + 1))
+        if rest is None:
+            return None
+        rule = rules["search_rule"]
+        if sweeping and rules["sweep_rule"] is not None:
+            rule = rules["sweep_rule"]  # without a sweep, the audit's
+        confirm = judge(baseline, rule, alpha)
+        verdict = _verdict(kw, rest, baseline, confirm, scores_only=True)
+        tally[f"{phase}_{rule}_{verdict}"] += 1
+        return verdict
 
     run = search.run()
     verdicts, waves = None, 0
@@ -164,23 +337,33 @@ def search_churn(search_class, dispatch, trial_submissions, trial_payloads):
         try:
             wave = run.send(verdicts)
         except StopIteration as stop:
-            summary = _summary(kw, search, stop.value, n, trials, waves)
+            control = (
+                _control_summary(made[0], kw, reps, rules, tally)
+                if made
+                else {}
+            )
+            summary = _summary(
+                kw, search, stop.value, n, trials, waves, control
+            )
             return [scd_churn.succeed(summary)]
         waves += 1
-        fresh = wave["fresh"]
-        # every wave also needs the fixed wildtype reference
-        wanted = [*((g, fresh) for g in wave["genotypes"]), (wildtype, 0)]
+        fresh, sweeping = wave["fresh"], wave.get("sweep", False)
         missing, waiting = {}, 0
-        for g, f in wanted:
-            for rep, (key, t) in enumerate(lookup(g, f).items()):
-                if t is None:
-                    missing[key] = {
-                        "key": _trial_key(g, rep, f),
-                        "cmd": kw["cmd"],
-                        "env": _trial_env(kw, n, g, rep),
-                    }
-                elif t["state"] == "pending":
-                    waiting += 1
+        # every wave also needs the wildtype's controls
+        baseline = need(wildtype, 0, range(num_control_trials))
+        verdicts = {}
+        for g in wave["genotypes"]:
+            if g == wildtype and not fresh:
+                verdicts[g] = ACCEPT
+            elif not sequential:
+                results = need(g, fresh, range(reps))
+                if results is not None and baseline is not None:
+                    rule = judge(baseline, "detectable_loss", alpha)
+                    verdicts[g] = _verdict(kw, results, baseline, rule)
+            else:
+                verdict = screen_then_confirm(g, fresh, sweeping, baseline)
+                if verdict is not None:
+                    verdicts[g] = verdict
         if missing or waiting:
             kept = len(search.current)
             message = (
@@ -192,12 +375,3 @@ def search_churn(search_class, dispatch, trial_submissions, trial_payloads):
                 [scd_churn.launch(list(missing.values()))] if missing else []
             )
             return [*launch, scd_churn.progress(n - kept, n, message)]
-        baseline = results_of(wildtype, 0)
-        verdicts = {
-            g: (
-                ACCEPT
-                if g == wildtype and not fresh
-                else _verdict(kw, results_of(g, fresh), baseline)
-            )
-            for g in wave["genotypes"]
-        }

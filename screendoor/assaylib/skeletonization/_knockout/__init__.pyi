@@ -5,4 +5,5 @@ from ._masks import UNKNOWN as UNKNOWN
 from ._masks import accepted_sites as accepted_sites
 from ._masks import singletons as singletons
 from ._masks import split as split
+from ._search_churn import make_search_churn as make_search_churn
 from ._search_churn import search_churn as search_churn
