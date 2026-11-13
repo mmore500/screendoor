@@ -102,6 +102,73 @@ def t_quantile(p: float, df: float) -> float:
     return (lo + hi) / 2.0
 
 
+def _gammainc(a: float, x: float) -> float:
+    """Evaluate the regularized lower incomplete gamma function P(a, x)."""
+    if x <= 0.0:
+        return 0.0
+    front = math.exp(a * math.log(x) - x - math.lgamma(a))
+    if x < a + 1.0:  # the series
+        term = total = 1.0 / a
+        for k in range(1, 100000):
+            term *= x / (a + k)
+            total += term
+            if term < total * 1e-16:
+                break
+        return front * total
+    tiny = 1e-300  # else the upper function's continued fraction, by Lentz
+
+    def clamp(v: float) -> float:
+        return v if abs(v) >= tiny else tiny
+
+    b = x + 1.0 - a
+    c, d = 1.0 / tiny, 1.0 / b
+    h = d
+    for i in range(1, 100000):
+        an = -i * (i - a)
+        b += 2.0
+        d = 1.0 / clamp(an * d + b)
+        c = clamp(b + an / c)
+        h *= d * c
+        if abs(d * c - 1.0) < 1e-15:
+            break
+    return 1.0 - front * h
+
+
+def chi2_quantile(p: float, df: float) -> float:
+    """Evaluate the chi-square quantile function, by bisection.
+
+    Parameters
+    ----------
+    p : float
+        A probability, strictly between 0 and 1.
+    df : float
+        Degrees of freedom, positive.
+
+    Returns
+    -------
+    float
+        The statistic `x` that a chi-square variable is at most with
+        probability `p`.
+
+    Raises
+    ------
+    ValueError
+        If `p` or `df` is out of range.
+    """
+    if not 0.0 < p < 1.0 or df <= 0:
+        raise ValueError("chi2_quantile needs 0 < p < 1 and df > 0")
+    lo, hi = 0.0, float(df)
+    while _gammainc(df / 2.0, hi / 2.0) < p:
+        hi *= 2.0
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        if _gammainc(df / 2.0, mid / 2.0) < p:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
 def _rank_sum_counts(r: int, n: int) -> list:
     """Count the orderings of `r` candidates among `n` controls that give
     each value of U, the number of pairs in which the candidate is the

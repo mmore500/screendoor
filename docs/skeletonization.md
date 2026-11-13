@@ -92,6 +92,9 @@ A dispatch runs in two phases, the policy's own search and then the sweep
 * `noninferiority`: a deletion is accepted only when its loss is *shown*
   to be under the margin, `mean * rel_tol + abs_tol`. The margin must
   then be positive, unless the controls are identical.
+* `sprt` or `mixture`: noninferiority again, but judged sequentially,
+  with an error rate for the whole search (see
+  [Sequential rules](#sequential-rules) below).
 
 `"sweep_rule": null` skips the sweep. With `final_audit`, the search's
 result is still audited, by `search_rule`, and then returned uncertified,
@@ -159,6 +162,92 @@ A loss smaller than about the t margin above usually goes unnoticed.
 More controls or `replicates` shrink that margin and make room for a
 lower `alpha`.
 
+### Sequential rules
+
+`sprt` and `mixture` are noninferiority rules too, but they take a
+genotype's trials a few at a time and stop as soon as its scores decide.
+A clearly harmful deletion costs one trial, a clearly harmless one a
+handful, and only deletions near the margin run long. They also bound the
+chance of a wrong acceptance over the whole search, where `alpha` bounds
+it for each test alone.
+
+* `sprt` is Wald's sequential probability ratio test. It tests a loss of
+  the whole margin against a loss smaller by the *indifference zone*,
+  `indifference` of the margin (0.4 by default). It accepts once the
+  likelihood ratio reaches `1 / alpha`, and gives up once it falls to
+  `futility` (0.1), which rejects the deletion without showing that it
+  loses more than the margin. A deletion that loses more than the margin
+  less half the zone is usually given up; one that loses less is accepted
+  in the end.
+* `mixture` is the normal-mixture confidence sequence of Howard et al.
+  (2021), tuned to the same zone. It accepts once the whole interval for
+  the genotype's mean score is above the limit, and rejects once it is
+  below, which does show a loss beyond the margin. It has no zone to give
+  up in, so a deletion near the margin runs to `max_replicates`.
+
+**Looks.** A genotype's first look takes `replicates` trials, and each
+later look doubles the total, up to `max_replicates` (64). A genotype
+still undecided there is rejected, and counted as `capped`. Scores are
+judged in replicate order and the first verdict reached stands, so a
+replay gives the same verdict whatever came in later.
+
+**Error rate.** `error_rate` (0.05) bounds the chance that any test of
+the whole search accepts a deletion that loses more than the margin. It
+is spent in three parts:
+
+* An eighth goes to an upper confidence bound on the wildtype's mean,
+  which raises the limit by `t(1 - error_rate/8, n - 1) * sd / sqrt(n)`
+  (times `1 - rel_tol`). The margin must be wider than that.
+* An eighth goes to an upper confidence bound on the wildtype's standard
+  deviation, `sd * sqrt((n - 1) / chi2(error_rate/8, n - 1))`, which every
+  test takes as the noise.
+* The rest is shared among the tests. The first `planned_tests` tests (8
+  per site by default) share half of it evenly, the next twice as many
+  share a quarter, and so on. A search never runs out, but tests past
+  the plan need more trials each.
+
+This assumes normal scores, with a candidate's no noisier than the
+controls'. With 40 controls the two bounds are costly: the limit rises by
+0.41 sd and the noise is taken as 1.38 sd. More controls make every test
+cheaper. The stage's `harmless_replicates` in the summary is how many
+scores at the controls' mean the first tests need to accept. For a
+100-site genome at the defaults:
+
+| Margin / control sd | `sprt`, 40 controls | `sprt`, 200 | `mixture`, 40 | `mixture`, 200 |
+|---|---|---|---|---|
+| 4 | 5 | 3 | 5 | 3 |
+| 3 | 10 | 6 | 9 | 5 |
+| 2 | 26 | 14 | 22 | 12 |
+| 1.5 | 54 | 25 | 46 | 21 |
+| 1 | 186 | 65 | 157 | 55 |
+
+A setting whose `harmless_replicates` would exceed `max_replicates` is
+refused, as no deletion could then be expected to pass.
+
+**Combining rules.** A sequential rule goes in both phases, or with no
+sweep, or with `detectable_loss` in the other phase. It cannot be mixed
+with `noninferiority` or with the other sequential rule.
+
+* With a sequential rule throughout, every commit has passed within the
+  error rate, so the final audit is off unless `final_audit` is set. A
+  fresh test of a skeleton near the margin would likely give up on it.
+  The certificate then means that no single further deletion could be
+  shown harmless within `max_replicates`.
+* A `sprt` search with the default `detectable_loss` sweep commits only
+  deletions shown harmless, then drops any remaining site whose loss is
+  not detectable. The search's trials then start at replicate
+  `replicates`, after the ones the sweep's rule judges.
+* A `detectable_loss` search with a sequential sweep holds the final
+  skeleton to the sequential rule by the final audit, as with
+  `noninferiority`.
+
+The stage's summary gives its `limit`, `sd_bound`, `indifference` zone
+(in score units) and `max_replicates`, and `verdicts` counts
+`search_sprt_accept`, `search_sprt_reject`, `search_sprt_capped` and so
+on. Sequential rules need scores, and controls judged by `t`. With
+identical controls there is no noise, and a genotype's first score
+decides.
+
 Given the same `search_seed`, `batch_size` and verdicts, the port takes the
 same path as the original: the same skeleton, proposal batches and
 certificate (checked by `test_matches_2026_11_03_implementation` and
@@ -173,18 +262,23 @@ certificate (checked by `test_matches_2026_11_03_implementation` and
 | `cmd` | required | Trial script |
 | `env` | `{}` | Extra trial environment |
 | `batch_size` | 8 | Candidates per wave (the original's `max_parallel`) |
-| `replicates` | 1 | Trials per genotype; scores are averaged. With a `noninferiority` rule, the confirmation's trials, after the screen's one |
+| `replicates` | 1 | Trials per genotype; scores are averaged. With a `noninferiority` rule, the confirmation's trials, after the screen's one. With a sequential rule, the first look's trials |
 | `rel_tol`, `abs_tol` | 0, 0 | Accept if `score >= base*(1-rel_tol) - abs_tol` |
 | `require_atleast` | `[]` | Result list fields that must not drop below wildtype (e.g. `tasks`) |
 | `accept_fraction` | 1.0 | For `{"accept": bool}` results: fraction of replicates needed |
 | `control_test` | `t` (`mean` with 1 control) | `t`, `rank` or `mean`: how scores are judged against the controls |
 | `alpha` | 0.05 | One-sided false-alarm rate for `t` and `rank` |
-| `search_rule` | `detectable_loss` | The search's rule: `detectable_loss` or `noninferiority` (see above) |
+| `search_rule` | `detectable_loss` | The search's rule: `detectable_loss`, `noninferiority`, `sprt` or `mixture` (see above) |
 | `sweep_rule` | `detectable_loss` | The sweep's rule, or `null` for no sweep (uncertified, status `sweep_skipped`) |
 | `screen_alpha` | `alpha` | With a `noninferiority` rule, the screen's alpha for a detectable loss on one replicate |
+| `error_rate` | 0.05 | With a sequential rule, the chance that any test of the search accepts a loss beyond the margin |
+| `indifference` | 0.4 | With a sequential rule, the indifference zone, as a fraction of the margin |
+| `futility` | 0.1 | With `sprt`, the likelihood ratio at which a deletion is given up |
+| `max_replicates` | 64 | With a sequential rule, the most trials per genotype |
+| `planned_tests` | 8 per site | With a sequential rule, how many tests share the first half of the tests' error rate |
 | `search_seed` | the dispatch's `meta_seed` | Seed of the search's own RNG |
 | `combination_rounds` | 2 | Rounds of union proposals after accepted masks |
-| `final_audit` | true | Re-test the skeleton afresh before certifying it |
+| `final_audit` | true (false with a sequential rule throughout) | Re-test the skeleton afresh before certifying it |
 | `audit_every` | 0 | Also audit after every this many commits (0: never) |
 | `max_rollbacks` | 2 | Failed audits tolerated before giving up |
 | `max_proposal_batches` | none | Stop (uncertified) after this many proposal batches |
@@ -314,7 +408,15 @@ search seeds each.
 
 ## Not ported
 
-The noisy evaluators (`BernoulliEvaluator`, `ConcentrationEvaluator`:
-anytime-valid confidence sequences and pooled Avida competitions) are not
-ported. `replicates` averages a fixed number of trials and is not a
-sequential test.
+The original's noisy evaluators (`BernoulliEvaluator`,
+`ConcentrationEvaluator`: pooled Avida competitions, and confidence
+sequences with a plug-in variance) are not ported. The sequential rules
+above take their place.
+
+Two methods from the 2026-11-13 tiered-knockouts study are left out. The
+APT thresholding-bandit allocation did no better than plain round-robin
+on most of its landscapes, and worse than `sprt` on all of them. The
+multi-fidelity tiers (IISE) helped only where the cheap assay was
+unbiased, and deleted fewer sites than `sprt` alone where it was not;
+they would also need a bias bound for each tier, which no assay here
+supplies.

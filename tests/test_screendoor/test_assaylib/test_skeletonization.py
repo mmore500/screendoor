@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import itertools
 import json
+import math
 import os
 import random
 import sys
@@ -820,14 +821,21 @@ def test_gama_without_sweep_stops_after_mate():
     assert len(result["retained"]) == 45 - search.stats["deleted"]["mate"]
 
 
-@pytest.mark.parametrize("policy", POLICIES)
-def test_detectable_loss_search_then_noninferiority_sweep(policy):
+@pytest.mark.parametrize(
+    "policy,rule",
+    [
+        *((policy, "noninferiority") for policy in POLICIES),
+        ("ddmin", "sprt"),
+        ("ddmin", "mixture"),
+    ],
+)
+def test_detectable_loss_search_then_noninferiority_sweep(policy, rule):
     """The search commits a mild deletion; the sweep's noninferiority
     audit rejects that skeleton, rolls it back, and keeps both mild sites."""
     kw = {
         **NONINFERIOR,
         "search_rule": "detectable_loss",
-        "sweep_rule": "noninferiority",
+        "sweep_rule": rule,
     }
     r = simulate_dispatch(
         f"scd.assaylib.skeletonization.{policy}",
@@ -839,4 +847,420 @@ def test_detectable_loss_search_then_noninferiority_sweep(policy):
     assert s["rollbacks"] == 1
     tally = s["control"]["verdicts"]
     assert tally["search_detectable_loss_accept"] > 0
-    assert tally["sweep_noninferiority_reject"] > 0
+    capped = tally.get(f"sweep_{rule}_capped", 0)  # undecided: kept, too
+    assert tally.get(f"sweep_{rule}_reject", 0) + capped > 0
+
+
+# -- sequential rules: sprt and mixture -------------------------------------
+
+from statistics import NormalDist  # noqa: E402
+
+from screendoor.assaylib.skeletonization._knockout._SequentialTest import (  # noqa: E402
+    SequentialTest,
+)
+from screendoor.assaylib.skeletonization._knockout._controls import (  # noqa: E402
+    chi2_quantile,
+)
+
+
+@pytest.mark.parametrize(
+    "p,df,want",
+    [
+        (0.95, 1, 3.8415),
+        (0.05, 10, 3.9403),
+        (0.01, 30, 14.9535),
+        (0.025, 39, 23.6543),
+        (0.95, 100, 124.3421),
+    ],
+)
+def test_chi2_quantile_matches_tables(p, df, want):
+    assert chi2_quantile(p, df) == pytest.approx(want, abs=1e-4)
+
+
+def _sequential(**kw):
+    """A SequentialTest on 40 controls of mean 0 and sd 0.0101, with a
+    margin of 0.03, and those controls."""
+    kw = {"abs_tol": 0.03, **kw}
+    c = Controls(kw, [0.01 * (-1) ** r for r in range(40)])
+    return SequentialTest(kw, c, 12), c
+
+
+def test_sequential_test_bounds_the_wildtype_mean_and_sd():
+    t, c = _sequential()
+    shift = t_quantile(1 - 0.05 / 8, 39) * c.sd / 40**0.5
+    assert t.limit == pytest.approx(c.limit + shift) and shift > 0
+    assert t.sd_bound == pytest.approx(
+        c.sd * (39 / chi2_quantile(0.05 / 8, 39)) ** 0.5
+    )
+    assert 1.3 * c.sd < t.sd_bound < 1.5 * c.sd
+    assert t.gap == pytest.approx(0.4 * (c.mean - t.limit))
+    # a relative tolerance scales the wildtype's mean, and so its bound
+    scores = [1 + x for x in c.scores]
+    kw = {"rel_tol": 0.1, "indifference": 1.0}
+    r = SequentialTest(kw, Controls(kw, scores), 12)
+    assert r.limit == pytest.approx(0.9 * (1 + shift))
+    assert r.gap == pytest.approx(1 - r.limit)
+
+
+def test_sequential_alphas_never_overspend():
+    t, _ = _sequential(planned_tests=10, error_rate=0.08)
+    alphas = [t.alpha(i) for i in range(10 * (2**12 - 1))]
+    assert alphas[:10] == [0.06 / 20] * 10  # the first share half
+    assert alphas[10:30] == [0.06 / 80] * 20  # twice as many, a quarter
+    assert alphas[30] == pytest.approx(0.06 / 320)
+    assert 0.0599 < sum(alphas) < 0.06  # of error_rate, 3/4 is the tests'
+    assert _sequential()[0].planned_tests == 8 * 12
+
+
+def test_sprt_is_the_gaussian_likelihood_ratio():
+    t, _ = _sequential()
+    null = NormalDist(t.limit, t.sd_bound)
+    alternative = NormalDist(t.limit + t.gap, t.sd_bound)
+    rng = random.Random(1)
+    for mean in (t.limit - 0.01, t.limit, t.limit + t.gap, 0.0):
+        scores = [rng.gauss(mean, 0.01) for _ in range(40)]
+        ratio, want = 0.0, None
+        for n, x in enumerate(scores, 1):
+            ratio += math.log(alternative.pdf(x) / null.pdf(x))
+            if want is None and ratio >= math.log(1 / 0.001):
+                want = "accept"
+            if want is None and ratio <= math.log(t.futility):
+                want = "reject"
+            assert t.judge(scores[:n], "sprt", 0.001) == want
+    assert t.judge([0.0] * 40, "sprt", 0.001) == "accept"
+    assert t.judge([-0.03] * 40, "sprt", 0.001) == "reject"
+
+
+def test_mixture_boundary_is_where_the_mixture_martingale_is_1_over_alpha():
+    t, _ = _sequential()
+    rho, alpha = (t.sd_bound / t.gap) ** 2, 0.001
+    for n in (1, 5, 40):
+        lo, hi = 0.0, 1.0  # bisect the total that the n-th score accepts
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            scores = [t.limit] * (n - 1) + [t.limit + mid]
+            if t.judge(scores, "mixture", alpha) == "accept":
+                hi = mid
+            else:
+                lo = mid
+        z = hi / t.sd_bound
+        # mix exp(lambda * z - lambda^2 * n / 2) over lambda ~ N(0, 1/rho)
+        prior, step = NormalDist(0.0, rho**-0.5), 1e-4
+        martingale = step * sum(
+            math.exp(lam * z - lam * lam * n / 2) * prior.pdf(lam)
+            for lam in (step * k for k in range(-200000, 200001))
+        )
+        assert martingale == pytest.approx(1 / alpha, rel=1e-6)
+        # and the interval is two-sided: the mirror total rejects
+        scores = [t.limit] * (n - 1) + [t.limit - hi * (1 + 1e-9)]
+        assert t.judge(scores, "mixture", alpha) == "reject"
+
+
+@pytest.mark.parametrize("rule", ["sprt", "mixture"])
+def test_sequential_rules_keep_their_alpha(rule):
+    t, c = _sequential()
+    rng = random.Random(2)
+
+    def accepted(mean, sd):
+        return sum(
+            t.judge([rng.gauss(mean, sd) for _ in range(64)], rule, 0.05)
+            == "accept"
+            for _ in range(2000)
+        )
+
+    # a loss of the whole margin, as noisy as the bound allows
+    assert 0 < accepted(t.limit, t.sd_bound) <= 0.05 * 2000
+    assert accepted(c.mean, c.sd) > 0.99 * 2000  # no loss
+
+
+def test_sequential_bounds_hold_over_fresh_controls():
+    """A loss of exactly the margin is accepted no more often than
+    `error_rate`, counting the controls' luck as well as the test's."""
+    rng = random.Random(3)
+    kw = {"abs_tol": 0.03, "error_rate": 0.2, "planned_tests": 1}
+    accepted = 0
+    for _ in range(300):
+        controls = [rng.gauss(0.0, 0.01) for _ in range(40)]
+        t = SequentialTest(kw, Controls(kw, controls), 12)
+        scores = [rng.gauss(-0.03, 0.01) for _ in range(64)]
+        accepted += t.judge(scores, "sprt", t.alpha(0)) == "accept"
+    assert accepted <= 0.2 * 300
+
+
+@pytest.mark.parametrize(
+    "kw,reason",
+    [
+        ({"error_rate": 0}, "error_rate"),
+        ({"futility": 1}, "futility"),
+        ({"indifference": 1.5}, "indifference"),
+        ({"max_replicates": 0}, "max_replicates"),
+        ({"planned_tests": 0}, "planned_tests"),
+        ({"control_test": "rank"}, "control_test 't'"),
+        ({"abs_tol": 0.004}, "needs a margin above 0.00419"),
+    ],
+)
+def test_sequential_test_refuses_bad_settings(kw, reason):
+    with pytest.raises(ValueError, match=reason):
+        _sequential(**kw)
+    # and a margin so thin that even a harmless deletion would not pass
+    t, _ = _sequential(abs_tol=0.006)
+    with pytest.raises(ValueError, match="would not accept"):
+        t.summary("sprt")
+
+
+SEQUENTIAL = {"abs_tol": 0.06, "batch_size": 8, "search_seed": 3}
+
+
+def _replicates_by_genotype(r):
+    by_genotype = {}
+    for t in r["trials"]:
+        k = t["key"]
+        g = (k["retained"], k.get("fresh", 0))
+        by_genotype.setdefault(g, set()).add(k["replicate"])
+    return by_genotype
+
+
+@pytest.mark.parametrize(
+    "policy,rule",
+    [("ddmin", "sprt"), ("hybrid", "sprt"), ("ddmin", "mixture")],
+)
+def test_sequential_rule_throughout(policy, rule):
+    essential = frozenset({0, 1, 2, 10, 29})
+    r = simulate_dispatch(
+        f"scd.assaylib.skeletonization.{policy}",
+        _kwargs(policy, 30, search_rule=rule, sweep_rule=rule, **SEQUENTIAL),
+        fake_trial=_competition(essential),
+    )
+    assert r["completed"]["outcome"] == "succeeded", r["completed"]
+    s = r["completed"]["summary"]
+    assert decode_sites(s["retained"]) == essential and s["certified"]
+    control = s["control"]
+    assert control["error_rate"] == 0.05 and control["margin"] == 0.06
+    stage = control["stages"]["search"]
+    assert control["stages"] == {"search": stage, "sweep": stage}
+    assert stage["rule"] == rule and stage["max_replicates"] == 64
+    assert -0.06 < stage["limit"] < -0.04
+    assert stage["sd_bound"] > control["sd"]
+    assert stage["indifference"] == pytest.approx(-0.4 * stage["limit"], 0.2)
+    assert 4 < stage["harmless_replicates"] <= 16
+    tally = control["verdicts"]
+    assert tally[f"search_{rule}_accept"] > 0
+    assert tally[f"search_{rule}_reject"] > 0
+    # every commit passed within the error rate, so nothing is audited
+    by_genotype = _replicates_by_genotype(r)
+    assert all(not fresh for _, fresh in by_genotype)
+    # looks double: an essential knockout is given up at once, and a
+    # harmless one takes several scores to accept
+    for (retained, _), reps in by_genotype.items():
+        if retained == "0-29":
+            continue  # the controls
+        assert reps == set(range(len(reps)))
+        assert len(reps) in (1, 2, 4, 8, 16, 32, 64)
+        if essential <= decode_sites(retained):
+            assert len(reps) >= 4, retained
+        else:
+            assert len(reps) <= 2, retained
+
+
+def _mild(costs, sd=0.02):
+    """A fake wildtype competition: a genotype's summed cost, plus noise
+    reproducible from the trial's key."""
+
+    def fake(t):
+        rng = random.Random(json.dumps(t["key"], sort_keys=True))
+        kept = decode_sites(t["env"]["retained"])
+        cost = sum(c for i, c in costs.items() if i not in kept)
+        return -cost + rng.gauss(0.0, sd)
+
+    return fake
+
+
+def test_sprt_keeps_small_losses_from_adding_up():
+    """Three sites each cost 0.022: within the 0.06 margin alone, but not
+    together. A detectable-loss search deletes all three; sprt stops
+    within the margin."""
+    costs = {0: 0.5, 1: 0.5, 10: 0.022, 11: 0.022, 12: 0.022}
+    lost = {}
+    for rule in ("detectable_loss", "sprt"):
+        r = simulate_dispatch(
+            "scd.assaylib.skeletonization.ddmin",
+            {
+                "n_sites": 16,
+                "cmd": "x",
+                "search_rule": rule,
+                "sweep_rule": rule,
+                "final_audit": False,
+                **SEQUENTIAL,
+            },
+            fake_trial=_mild(costs),
+        )
+        kept = decode_sites(r["completed"]["summary"]["retained"])
+        assert {0, 1} <= kept
+        lost[rule] = sum(c for i, c in costs.items() if i not in kept)
+    assert lost["detectable_loss"] == pytest.approx(0.066)
+    assert 0 < lost["sprt"] <= 0.06
+
+
+def test_sequential_churn_is_pure_and_replayable():
+    kw = {
+        "n_sites": 16,
+        "cmd": "x",
+        "search_rule": "sprt",
+        "sweep_rule": "sprt",
+        "batch_size": 4,
+        "abs_tol": 0.06,
+    }
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.ddmin",
+        kw,
+        fake_trial=_competition(frozenset({3, 9})),
+        meta_seed=7,
+    )
+    d = {
+        "assay_kwargs": kw,
+        "meta_seed": 7,
+        "dispatch_uuid": r["dispatch_uuid"],
+    }
+    churn = skeletonization.ddmin.churn
+    (ctx,) = load_dispatches(r["dispatchdir"])
+    subs, pays = ctx.read_trial_submissions(), ctx.read_trial_payloads()
+    a1 = churn(d, subs, pays, [])
+    a2 = churn(d, subs[::-1], pays[::-1], [])
+    assert (
+        a1
+        == a2
+        == [
+            {
+                "action": "succeed",
+                "kwargs": {"summary": r["completed"]["summary"]},
+            }
+        ]
+    )
+    # cut off midway, it asks only for trials that were in fact launched
+    keys = {json.dumps(t["key"], sort_keys=True) for t in r["trials"]}
+    done = {p["trial_uuid"] for p in pays[: len(pays) // 2]}
+    launch = churn(d, [x for x in subs if x["trial_uuid"] in done], pays, [])
+    assert launch[0]["action"] == "launch"
+    asked = launch[0]["kwargs"]["trials"]
+    assert asked and all(
+        json.dumps(t["key"], sort_keys=True) in keys for t in asked
+    )
+
+
+def test_sprt_search_then_detectable_loss_sweep():
+    """The search's streams start after the replicates that the sweep's
+    rule judges, and the sweep's skeleton is audited afresh."""
+    essential = frozenset({0, 1, 2, 10, 29})
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.ddmin",
+        {
+            "n_sites": 30,
+            "cmd": "x",
+            "search_rule": "sprt",
+            "replicates": 2,
+            **SEQUENTIAL,
+        },
+        fake_trial=_competition(essential),
+    )
+    s = r["completed"]["summary"]
+    assert decode_sites(s["retained"]) == essential and s["certified"]
+    stages = s["control"]["stages"]
+    assert stages["search"]["rule"] == "sprt"
+    assert stages["sweep"]["rule"] == "detectable_loss"
+    assert stages["sweep"]["replicates"] == 2
+    tally = s["control"]["verdicts"]
+    assert tally["search_sprt_accept"] > 0
+    assert tally["sweep_detectable_loss_reject"] >= len(essential)
+    by_genotype = _replicates_by_genotype(r)
+    assert any(fresh for _, fresh in by_genotype)  # the final audit
+    streams = 0
+    for (retained, fresh), reps in by_genotype.items():
+        if retained == "0-29":
+            continue  # the controls
+        fixed, stream = reps & {0, 1}, reps - {0, 1}
+        assert fixed in (set(), {0, 1})
+        assert stream == set(range(2, 2 + len(stream)))
+        assert len(stream) in (0, 2, 4, 8, 16, 32, 64)
+        assert not (fresh and stream)  # the audit is the sweep's
+        streams += bool(stream)
+    assert streams == sum(
+        v for k, v in tally.items() if k.startswith("search_")
+    )
+
+
+def test_sequential_rule_with_identical_controls_counts_any_loss():
+    costs = {0: 0.5, 3: 1e-6}  # site 3's loss is tiny, but real
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.ddmin",
+        {
+            "n_sites": 8,
+            "cmd": "x",
+            "search_rule": "sprt",
+            "sweep_rule": "sprt",
+        },
+        fake_trial=lambda t: -sum(
+            c
+            for i, c in costs.items()
+            if i not in decode_sites(t["env"]["retained"])
+        ),
+    )
+    s = r["completed"]["summary"]
+    assert decode_sites(s["retained"]) == {0, 3}
+    stage = s["control"]["stages"]["search"]
+    assert stage["sd_bound"] == 0 and stage["harmless_replicates"] == 1
+    assert all(
+        reps == {0}
+        for (retained, _), reps in _replicates_by_genotype(r).items()
+        if retained != "0-7"
+    )
+
+
+def test_sequential_final_audit_is_opt_in():
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.ddmin",
+        {
+            "n_sites": 12,
+            "cmd": "x",
+            "search_rule": "mixture",
+            "sweep_rule": None,
+            "final_audit": True,
+            **SEQUENTIAL,
+        },
+        fake_trial=_competition(frozenset({0, 1})),
+    )
+    s = r["completed"]["summary"]
+    assert s["status"] == "sweep_skipped" and {0, 1} <= decode_sites(
+        s["retained"]
+    )
+    assert any(fresh for _, fresh in _replicates_by_genotype(r))
+    assert s["control"]["verdicts"]["sweep_mixture_accept"] == 1
+
+
+@pytest.mark.parametrize(
+    "kw,fake,reason",
+    [
+        ({"sweep_rule": "noninferiority"}, _parity({}), "goes with"),
+        ({"sweep_rule": "mixture"}, _parity({}), "goes with"),
+        ({"control_test": "rank"}, _parity({}), "control_test"),
+        ({"abs_tol": 0}, _parity({}), "needs a margin"),
+        ({"abs_tol": 0.006}, _parity({}), "would not accept"),
+        ({}, lambda t: {"accept": True}, "needs scores"),
+        ({"replicates": 4, "max_replicates": 2}, _parity({}), "at least"),
+    ],
+)
+def test_sequential_rule_refuses_bad_settings(kw, fake, reason):
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.ddmin",
+        {
+            "n_sites": 8,
+            "cmd": "x",
+            "search_rule": "sprt",
+            "sweep_rule": "sprt",
+            "abs_tol": 0.03,
+            **kw,
+        },
+        fake_trial=fake,
+        churn_maxretry=0,
+    )
+    assert r["completed"]["outcome"] == "failed"
+    assert reason in r["completed"]["reason"]

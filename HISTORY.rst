@@ -36,6 +36,14 @@ Unreleased
   (``screen_alpha``), then confirmed on ``replicates`` more by its phase's
   rule. When the rule changes, the sweep judges the search's verdicts again
   from their recorded trials. ``"sweep_rule": null`` skips the sweep.
+* ``search_rule`` and ``sweep_rule`` take two sequential noninferiority
+  rules: ``sprt`` (Wald's sequential probability ratio test, with an
+  indifference zone) and ``mixture`` (the normal-mixture confidence
+  sequence of Howard et al. 2021). A genotype's trials come a few at a
+  time, doubling from ``replicates`` up to ``max_replicates``, until its
+  scores decide. ``error_rate`` bounds the chance of any wrong acceptance
+  over the whole search, including the uncertainty in the controls' mean
+  and standard deviation. See docs/skeletonization.md.
 
 0.1.0 (2026-11-12)
 ------------------

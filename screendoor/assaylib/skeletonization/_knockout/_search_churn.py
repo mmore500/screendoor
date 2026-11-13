@@ -7,6 +7,7 @@ from .... import churn as scd_churn
 from ....auxlib._canonical_json import canonical_json
 from ....auxlib._encode_sites import encode_sites
 from ._KnockoutSearch import KnockoutSearch
+from ._SequentialTest import SEQUENTIAL_RULES, SequentialTest
 from ._controls import RULES, Controls, t_quantile
 from ._masks import ACCEPT, REJECT
 
@@ -67,20 +68,20 @@ def _verdict(
     kw: dict,
     results: list,
     baseline: list,
-    judge: typing.Callable[[list[float]], bool],
+    judge: typing.Callable[[list[float]], str | None],
     *,
     scores_only: bool = False,
-) -> str:
+) -> str | None:
     """Accept or reject a genotype from its replicates' results, given the
     wildtype controls' results, `baseline`.
 
-    `judge(scores)` judges the replicates' scores; `scores_only` refuses
-    `accept` results.
+    `judge(scores)` gives the verdict on the replicates' scores, or None if
+    they do not decide yet; `scores_only` refuses `accept` results.
     """
     rs = [_as_dict(r) for r in results]
     baseline = [_as_dict(b) for b in baseline]
     if scores_only and any("accept" in r for r in rs):
-        raise ValueError("noninferiority needs scores, not accept results")
+        raise ValueError("this rule needs scores, not accept results")
     if any("accept" in r for r in rs):
         if not all("accept" in r for r in rs):
             raise ValueError("some results have 'accept' and some do not")
@@ -103,7 +104,7 @@ def _verdict(
                 )
             if any(g < w for g, w in zip(r[field], want)):
                 return REJECT
-    return ACCEPT if judge([float(r["score"]) for r in rs]) else REJECT
+    return judge([float(r["score"]) for r in rs])
 
 
 def _summary(
@@ -162,14 +163,28 @@ def _pass_rate(
     return NormalDist().cdf(c.margin / c.se(replicates) + sign * q)
 
 
+def _stage(c: Controls, rule: str, alpha: float, replicates: int) -> dict:
+    """Summarize a stage that judges a fixed number of replicates."""
+    return {
+        "rule": rule,
+        "alpha": alpha,
+        "replicates": replicates,
+        "threshold": c.threshold(rule, alpha, replicates),
+        "harmless_pass_rate": _pass_rate(c, rule, alpha, replicates),
+    }
+
+
 def _control_summary(
-    c: Controls, reps: int, rules: dict, tally: Counter
+    c: Controls,
+    reps: int,
+    rules: dict,
+    tally: Counter,
+    sequential: SequentialTest | None,
 ) -> dict:
-    """Summarize the controls and each stage's rule, alpha and
-    threshold."""
+    """Summarize the controls and each stage's rule and thresholds."""
     info = c.summary()
-    if not rules["sequential"]:
-        alpha = rules["alpha"]
+    alpha = rules["alpha"]
+    if not (rules["screened"] or sequential):
         if c.test != "mean":
             info["alpha"] = alpha
         threshold = c.threshold("detectable_loss", alpha, reps)
@@ -178,25 +193,23 @@ def _control_summary(
         else:
             info["threshold"] = threshold
         return info
-    stages = {
-        "screen": ("detectable_loss", rules["screen_alpha"], 1),
-        "search": (rules["search_rule"], rules["alpha"], reps),
-    }
-    if rules["sweep_rule"] is not None:
-        stages["sweep"] = (rules["sweep_rule"], rules["alpha"], reps)
+    stages = {}
+    if rules["screened"]:
+        stages["screen"] = _stage(
+            c, "detectable_loss", rules["screen_alpha"], 1
+        )
+    for phase in ("search", "sweep"):
+        rule = rules[f"{phase}_rule"]
+        if rule in SEQUENTIAL_RULES:
+            stages[phase] = sequential.summary(rule)
+        elif rule is not None:
+            stages[phase] = _stage(c, rule, alpha, reps)
     info["margin"] = c.margin
-    info["stages"] = {
-        name: {
-            "rule": rule,
-            "alpha": alpha,
-            "replicates": r,
-            "threshold": c.threshold(rule, alpha, r),
-            "harmless_pass_rate": _pass_rate(c, rule, alpha, r),
-        }
-        for name, (rule, alpha, r) in stages.items()
-    }
+    info["stages"] = stages
     info["sweep"] = rules["sweep_rule"] is not None
     info["verdicts"] = dict(sorted(tally.items()))
+    if sequential:
+        info["error_rate"] = sequential.error_rate
     return info
 
 
@@ -270,6 +283,12 @@ def search_churn(
     its replicate 0 screens it, rejecting a detectable loss, and replicates
     1 to `replicates` then confirm it by its phase's rule.
 
+    A phase's rule may instead be sequential, `sprt` or `mixture` (see
+    `SequentialTest`). Its genotypes are judged look by look: the first
+    look takes `replicates` scores and each later one doubles the total,
+    up to `max_replicates`, where an undecided genotype is rejected. The
+    other phase's rule is then the same, `detectable_loss` or None.
+
     See docs/skeletonization.md for the assay kwargs.
 
     Parameters
@@ -304,16 +323,31 @@ def search_churn(
         "alpha": alpha,
         "screen_alpha": float(kw.get("screen_alpha", alpha)),
     }
-    if rules["search_rule"] not in RULES:
-        raise ValueError(f"search_rule must be one of {RULES}")
-    if rules["sweep_rule"] not in (*RULES, None):
-        raise ValueError(f"sweep_rule must be one of {RULES} or null")
+    known = (*RULES, *SEQUENTIAL_RULES)
+    if rules["search_rule"] not in known:
+        raise ValueError(f"search_rule must be one of {known}")
+    if rules["sweep_rule"] not in (*known, None):
+        raise ValueError(f"sweep_rule must be one of {known} or null")
+    phase_rules = {rules["search_rule"], rules["sweep_rule"]} - {None}
     # with noninferiority anywhere, every genotype is screened, then
     # confirmed: one trial key layout for the whole dispatch
-    rules["sequential"] = sequential = "noninferiority" in (
-        rules["search_rule"],
-        rules["sweep_rule"],
-    )
+    rules["screened"] = screened = "noninferiority" in phase_rules
+    streamed = phase_rules & set(SEQUENTIAL_RULES)
+    if len(streamed) > 1 or (streamed and screened):
+        raise ValueError(
+            "a sequential rule goes with itself, detectable_loss or no sweep"
+        )
+    # a stream never reuses the replicates another rule has judged
+    stream_start = reps if len(phase_rules) > 1 else 0
+    search_kwargs = {
+        k: kw[k]
+        for k in (*SEARCH_KWARGS, *search_class.policy_kwargs)
+        if k in kw
+    }
+    if phase_rules == streamed:
+        # every commit passed within the error rate: a fresh audit would
+        # only risk rejecting one again
+        search_kwargs.setdefault("final_audit", False)
     # the search's own Random, replayed every tick: never the global one
     seed = kw.get("search_seed", dispatch["meta_seed"])
     search = search_class(
@@ -323,11 +357,7 @@ def search_churn(
         sweep=rules["sweep_rule"] is not None,
         rejudge_at_sweep=rules["sweep_rule"]
         not in (None, rules["search_rule"]),
-        **{
-            k: kw[k]
-            for k in (*SEARCH_KWARGS, *search_class.policy_kwargs)
-            if k in kw
-        },
+        **search_kwargs,
     )
     wildtype = search.original
     by_key = {canonical_json(t["key"]): t for t in trials}
@@ -357,10 +387,12 @@ def search_churn(
             return None
         return [scd_churn.trial_result(t) for t in found]
 
-    made: list[Controls] = []  # the Controls, once a score is first judged
-    tally: Counter = Counter()  # screened and confirmed verdicts, by phase
+    # the Controls and any SequentialTest, once a score is first judged
+    made: list = []
+    tally: Counter = Counter()  # each phase's verdicts, where staged
+    streams: dict = {}  # each sequential test's number, in the order asked
 
-    def controls(baseline: list) -> Controls:
+    def controls(baseline: list) -> tuple[Controls, SequentialTest | None]:
         if not made:
             scores = []
             for r in map(_as_dict, baseline):
@@ -368,26 +400,61 @@ def search_churn(
                     raise ValueError(f"trial result lacks ['score']: {r!r}")
                 scores.append(float(r["score"]))
             c = Controls(kw, scores)
-            if sequential and not c.flat and c.margin <= 0:
+            if screened and not c.flat and c.margin <= 0:
                 raise ValueError(
                     "noninferiority needs a margin: set rel_tol or abs_tol"
                 )
+            sequential = SequentialTest(kw, c, n) if streamed else None
+            if sequential and sequential.max_replicates < reps:
+                raise ValueError("max_replicates must be at least replicates")
             # refuse settings no candidate could pass, before judging one
-            _control_summary(c, reps, rules, tally)
-            made.append(c)
-        return made[0]
+            _control_summary(c, reps, rules, tally, sequential)
+            made.extend([c, sequential])
+        return made[0], made[1]
 
     def judge(
         baseline: list, rule: str, alpha: float
-    ) -> typing.Callable[[list[float]], bool]:
-        return lambda scores: controls(baseline).accepts(scores, rule, alpha)
+    ) -> typing.Callable[[list[float]], str]:
+        def verdict(scores: list[float]) -> str:
+            c, _ = controls(baseline)
+            return ACCEPT if c.accepts(scores, rule, alpha) else REJECT
+
+        return verdict
+
+    def follow_stream(
+        g: frozenset[int], fresh: int, rule: str, phase: str, baseline: list
+    ) -> str | None:
+        """Judge `g` by a sequential rule, look by look; None until the
+        next look's trials are in."""
+        index = streams.setdefault((g, fresh), len(streams))
+
+        def decide(scores: list[float]) -> str | None:
+            _, sequential = controls(baseline)
+            return sequential.judge(scores, rule, sequential.alpha(index))
+
+        total = reps
+        while True:
+            results = need(g, fresh, range(stream_start, stream_start + total))
+            if results is None or baseline is None:
+                return None
+            verdict = _verdict(kw, results, baseline, decide, scores_only=True)
+            most = made[1].max_replicates if made else total
+            if verdict is None and total < most:
+                total = min(2 * total, most)
+                continue
+            tally[f"{phase}_{rule}_{verdict or 'capped'}"] += 1
+            return verdict or REJECT
 
     def screen_then_confirm(
-        g: frozenset[int], fresh: int, sweeping: bool, baseline: list | None
+        g: frozenset[int],
+        fresh: int,
+        rule: str,
+        phase: str,
+        baseline: list | None,
     ) -> str | None:
-        """Screen `g` on replicate 0 and, if it passes, confirm it on
-        replicates 1 to `replicates`; None until its trials are in."""
-        phase = "sweep" if sweeping else "search"
+        """Screen `g` on replicate 0 and, if it passes, confirm it by
+        `rule` on replicates 1 to `replicates`; None until its trials are
+        in."""
         first = need(g, fresh, [0])
         if first is None or baseline is None:
             return None
@@ -398,9 +465,6 @@ def search_churn(
         rest = need(g, fresh, range(1, reps + 1))
         if rest is None:
             return None
-        rule = rules["search_rule"]
-        if sweeping and rules["sweep_rule"] is not None:
-            rule = rules["sweep_rule"]  # without a sweep, the audit's
         confirm = judge(baseline, rule, alpha)
         verdict = _verdict(kw, rest, baseline, confirm, scores_only=True)
         tally[f"{phase}_{rule}_{verdict}"] += 1
@@ -413,7 +477,9 @@ def search_churn(
             wave = run.send(verdicts)
         except StopIteration as stop:
             control = (
-                _control_summary(made[0], reps, rules, tally) if made else {}
+                _control_summary(made[0], reps, rules, tally, made[1])
+                if made
+                else {}
             )
             summary = _summary(
                 kw, search, stop.value, n, trials, waves, control
@@ -421,22 +487,32 @@ def search_churn(
             return [scd_churn.succeed(summary)]
         waves += 1
         fresh, sweeping = wave["fresh"], wave.get("sweep", False)
+        phase = "sweep" if sweeping else "search"
+        rule = rules["search_rule"]
+        if sweeping and rules["sweep_rule"] is not None:
+            rule = rules["sweep_rule"]  # without a sweep, the audit's
         missing, waiting = {}, 0
         # every wave also needs the wildtype's controls
         baseline = need(wildtype, 0, range(num_control_trials))
         verdicts = {}
         for g in wave["genotypes"]:
             if g == wildtype and not fresh:
-                verdicts[g] = ACCEPT
-            elif not sequential:
+                verdict = ACCEPT
+            elif rule in SEQUENTIAL_RULES:
+                verdict = follow_stream(g, fresh, rule, phase, baseline)
+            elif screened:
+                verdict = screen_then_confirm(g, fresh, rule, phase, baseline)
+            else:
+                verdict = None
                 results = need(g, fresh, range(reps))
                 if results is not None and baseline is not None:
-                    rule = judge(baseline, "detectable_loss", alpha)
-                    verdicts[g] = _verdict(kw, results, baseline, rule)
-            else:
-                verdict = screen_then_confirm(g, fresh, sweeping, baseline)
-                if verdict is not None:
-                    verdicts[g] = verdict
+                    verdict = _verdict(
+                        kw, results, baseline, judge(baseline, rule, alpha)
+                    )
+                    if streamed:  # the other phase's rule is sequential
+                        tally[f"{phase}_{rule}_{verdict}"] += 1
+            if verdict is not None:
+                verdicts[g] = verdict
         if missing or waiting:
             kept = len(search.current)
             message = (
