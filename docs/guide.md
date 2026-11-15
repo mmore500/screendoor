@@ -60,6 +60,7 @@ uses to re-run each churn call from the state it saw.
 | `scd.assaylib.skeletonization.minesweeper` | 4-stage Minesweeper (Rees-Garbutt 2020) |
 | `scd.assaylib.skeletonization.hybrid` | Multi-dose pilot, then top-down ddmin or bottom-up sieve |
 | `scd.assaylib.skeletonization.gama` | Guess/Add/Mate genetic algorithm (Rees-Garbutt 2020) |
+| `scd.assaylib.skeletonization.staged` | Cheap screens for lethal knockouts, a regression ranking, then one confirmed cutoff |
 
 Each skeletonization module also has `make_churn(*,
 num_control_trials=40)`. The wildtype runs that many times as controls,

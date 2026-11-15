@@ -21,6 +21,10 @@ All four finish with a complete singleton sweep and a fresh final audit, as
 in the original. Every committed deletion was tested directly against the
 fixed wildtype reference.
 
+A fifth assay, **staged**, works differently: it needs a cheap pass/fail
+screen for large failures, and estimates small costs by regression (see
+[Staged](#staged) below).
+
 Each policy reads in its own file (`ddmin/_churn.py`, `minesweeper/_churn.py`,
 `hybrid/_churn.py`, where hybrid builds on ddmin's partition-union, and
 `gama/_churn.py`). The machinery they share (evaluation, combination, audits
@@ -364,6 +368,124 @@ unions, generations run, and the largest deletion after each stage
 
 The paper runs on the stochastic *M. genitalium* whole-cell model. Here,
 use `replicates` with `accept_fraction` to get the same kind of verdicts.
+
+## Staged
+
+`scd.assaylib.skeletonization.staged` is for a genome where a cheap,
+pass/fail *screen* can spot large failures, and only a long, scored trial
+can measure small ones. It assumes **no rescue**: a knockout that fails
+keeps failing with more sites out. It runs in three stages.
+
+1. **Screens.** Random knockouts are screened at a dose that fails
+   about half the time, and each failure is shrunk by bisection, several
+   side by side, to a minimal failing set. A set of one is a critical
+   site. A larger set is *jackknifed* (see below) to tell a redundant
+   set, of which one member is kept and the rest go on, from losses
+   adding up. The dose rises as sites are retained. The stage ends when
+   the whole remaining pool, knocked out together, passes. A knockout
+   the screen has settled is never asked for again: with no rescue, a
+   knockout inside one that passed passes, and one containing a failing
+   set fails.
+2. **Ranking.** Score random knockouts of the pool with long trials, and
+   estimate each site's cost by least squares on which sites were out.
+   The trials double from 100 until `max_ranking_trials`, or until, with
+   four trials a site or more, another deleted site is predicted to cost
+   over `site_value` long trials. A site whose cost alone is clearly more
+   than can be accepted is left in from then on.
+3. **Confirmation.** Sort the pool from least to most costly and find,
+   by bisection, the longest prefix whose knockout the
+   [`sprt`](#sequential-rules) rule accepts against the wildtype
+   controls. These few tests carry the whole `error_rate`.
+
+**Redundant, or adding up?** A screen that detects a loss of some size
+also fails when smaller losses add up to it, so a minimal failing set of
+several sites is one of two things. If it is *redundant*, the genome is
+fine until every member is out, and putting any one back leaves no loss.
+If its losses *add up*, putting one back leaves most of the loss. The
+jackknife puts each member back in turn and tests what is left with the
+next test up: the next screen, which must be more sensitive, or, after
+the last screen, `jackknife_replicates` long trials, which fail if their
+mean loss is more than the confirmation could accept.
+
+* If no leave-one-out knockout fails, the set is redundant, and one
+  member is kept.
+* If one fails, the losses add up. No member is kept for the set, and
+  each member that fails the same test when knocked out alone is
+  critical: a site that cannot be taken out alone is costly, and one
+  that can is redundant or cheap, and stays in the pool.
+
+Two leave-one-out knockouts are tested first, as they settle a set whose
+losses add up: one of any two keeps at least half the set's loss. This
+assumes that what the screen detects is over twice what the next test
+does. A shrink gives up on a failing set of more than `max_set_size`
+sites, which caps its cost; with a further screen, that knockout is then
+searched by halving for sites harmful alone. Each later screen also
+searches the whole pool by halving, and a kept member is released if
+another member of its set turns out to be retained anyway.
+
+**Trials.** A screen trial gets `$screen`, its number from 0 (the
+cheapest), and passes if it sends `true` or `{"accept": true}`: the
+knockout shows no large failure. A long trial gets no `$screen` and sends
+a score, as a number or `{"score": ..., "viable": ...}`. A ranking sample
+that is not viable is skipped and counted in `stats.nonviable`. Screens
+run once each: a screen that misreads is not allowed for.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `n_sites` or `sequence`, `nop_symbol`, `cmd`, `env` | | As above |
+| `screens` | 1 | How many screens, cheapest first; or a list of each one's own `cmd` and `env`, over the dispatch's |
+| `batch_size` | 20 | Random knockouts per round of the first screen |
+| `max_set_size` | 6 | The largest failing set a shrink follows, and so jackknifes |
+| `jackknife_replicates` | 4 | Long trials per knockout, where the jackknife's test is long trials |
+| `max_ranking_trials` | 3200 | The most long trials the ranking takes |
+| `site_value` | 400 | Long trials another deleted site is worth, to the ranking |
+| `replicates` | `harmless_replicates` | The first look of each confirmation |
+| `rel_tol`, `abs_tol`, `require_atleast` | 0, 0, `[]` | The margin, as above; a result under the wildtype in a `require_atleast` field is not viable |
+| `error_rate`, `indifference`, `futility`, `max_replicates` | | The `sprt` rule's, as above |
+| `planned_tests` | 16 | As above; the confirmation makes about `log2` of the pool |
+| `search_seed` | the dispatch's `meta_seed` | Seed of the search's own RNG |
+
+The summary gives the `critical` sites, the `redundant_sets` and the
+sets found `adding_up`, with the screen that found each, the sites `kept`
+and `released`, whether the whole pool passes the first screen
+(`pool_certified`), the `ranking` from least to most costly with its
+`effects` and their standard error, the `predicted_cutoff`, each of the
+`confirmations`, and `stats`. It claims no single-deletion minimality:
+deleted sites are those the ranking put first, up to the margin.
+
+The search takes many waves, about 50 to 200 on the toys below, as each
+bisection step and each look waits for the last.
+
+**Limits.** A first use on a real genome (386 sites, scores with a
+standard deviation near the margin's size) showed three:
+
+* The confirmation takes the ranking's order as given. If the pool still
+  holds a set that fails together (`pool_certified` is false), the
+  bisection stops at the prefix that completes it, and every site ranked
+  after stays in, untested.
+* Where the jackknife's test is long trials, a failing set of `k` sites
+  takes up to `2 * k * jackknife_replicates` of them. Many small,
+  overlapping failing sets made that the larger part of the search, over
+  more than 600 waves.
+* That test makes no allowance for how many knockouts it judges, so a few
+  harmless sites are found critical by chance; more
+  `jackknife_replicates` make that rarer.
+
+On toy genomes of 100 sites (critical sites, redundant pairs and 20 weak
+sites, 200 controls, a margin of two control standard deviations, 10
+seeds each),
+against `ddmin` judged by `sprt`:
+
+| Toy | Could delete | `staged`: deleted, long trials, screen trials | `ddmin` + `sprt`: deleted, long trials |
+|---|---|---|---|
+| 5 critical, 5 pairs | 82 | 78, 2,104, 260 | 66.5, 13,684 |
+| 30 critical, 3 pairs | 59 | 54.5, 1,705, 302 | 49, 10,605 |
+| 5 critical, 10 pairs, 3 triples | 74 | 69, 2,216, 395 | 59.5, 13,102 |
+| 80 weak sites | 37 | 24, 2,127, 214 | 24.5, 9,422 |
+
+These toys have no rescue, a screen that never misreads, and normal
+noise. Where weak sites interact, `ddmin` deleted a few more (81.5 of 84
+against 79.5).
 
 ## Minesweeper and the paper
 
