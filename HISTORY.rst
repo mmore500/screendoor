@@ -44,6 +44,14 @@ Unreleased
   scores decide. ``error_rate`` bounds the chance of any wrong acceptance
   over the whole search, including the uncertainty in the controls' mean
   and standard deviation. See docs/skeletonization.md.
+* Assay ``skeletonization.staged``, for genomes with a cheap pass/fail
+  screen for large failures. It finds the critical sites and redundant
+  sets by screening random knockouts and shrinking the failures, ranks
+  the remaining sites by regression on scored trials of knockouts of many
+  sites at once, and confirms one cutoff by the ``sprt`` rule. A failing
+  set of several sites is jackknifed, putting each member back in turn,
+  to tell a redundant set from small losses adding up; further
+  ``screens``, each more sensitive, serve as that test.
 
 0.1.0 (2026-11-12)
 ------------------
