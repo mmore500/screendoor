@@ -560,10 +560,12 @@ def churn(
       whose knockout shows nothing. The search's test is rundishtiny's
       own: the knockout and the wildtype, each alone in a world, side by
       side until they differ (`divergence`). Its audits, which pace
-      themselves and roll a failure back, also compete the knockouts so
-      far against the wildtype on fresh worlds (`identity_worlds`), each
-      of which must end bit-identical to the wildtype's own. Nothing is
-      kept that an audit has not accepted.
+      themselves, also compete the knockouts so far against the wildtype
+      on fresh worlds (`identity_worlds`), each of which must end
+      bit-identical to the wildtype's own. A failed audit sifts what was
+      knocked out since the last that passed, by halves: what passes
+      stays out, and a unit that fails alone goes back in for good.
+      Nothing is kept that an audit has not accepted.
     * `fitness:<kind>` searches, by the `staged` policy, for the units
       whose knockout costs no more than the margin of fitness. A screen
       is one competition of the `screen` size, and fails a knockout whose

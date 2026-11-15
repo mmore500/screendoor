@@ -45,11 +45,11 @@ class KnockoutSearch:
     audit_adaptive : bool, default False
         Whether audits pace themselves: each one that passes doubles
         `audit_every`, and each that fails halves it. A failed audit then
-        finds the newest checkpoint that passes by bisection, back to the
-        last one audited, and narrows what the next commit deleted to a
-        part that still fails, by halves; no genotype is committed again
-        that deletes all of that part; and the result is the newest
-        audited checkpoint, with no commit unaudited.
+        sifts what was deleted since the last one that passed, by
+        halves: a part an audit accepts stays deleted, and a site that
+        fails alone goes back in, and is not deleted again. Nothing rolls
+        back, and the result is the newest audited genotype, with no
+        commit unaudited.
     max_rollbacks : int, default 2
         Failed audits tolerated before giving up.
     max_proposal_batches : int or None, default None
@@ -100,7 +100,7 @@ class KnockoutSearch:
         self.audit_every = audit_every
         self.audit_adaptive = audit_adaptive
         self.audited = 0  # the newest checkpoint an audit accepted
-        self.failed: list = []  # genotypes that audits rejected
+        self.excluded: set = set()  # sites that audits put back in
         self.max_rollbacks = max_rollbacks
         self.max_proposal_batches = max_proposal_batches
         self.initial_knockout_size = initial_knockout_size
@@ -152,8 +152,8 @@ class KnockoutSearch:
         candidates = list(dict.fromkeys(candidates))
         result, pending = {}, []
         for s in candidates:
-            if not fresh and any(s <= f for f in self.failed):
-                self.cache[s] = REJECT  # it deletes all a failed audit did
+            if not fresh and not self.excluded <= s:
+                self.cache[s] = REJECT  # it deletes what an audit put back
             if s in self.cache and not fresh:
                 result[s] = self.cache[s]
             else:
@@ -385,9 +385,46 @@ class KnockoutSearch:
         self.checkpoints.append(self.current)
         self.commits_since_audit += 1
 
+    def sift(
+        self, good: frozenset[int], block: list[int], fails: bool
+    ) -> typing.Generator[dict, dict, frozenset[int]]:
+        """Delete from `good`, a genotype that audits accept, as much of
+        `block` as they also accept, by halves: a part that passes is
+        deleted, and a site that fails alone is excluded.
+
+        Parameters
+        ----------
+        good : frozenset of int
+            A genotype that an audit accepted.
+        block : list of int
+            Sites of it to delete.
+        fails : bool
+            Whether deleting the whole block is known to fail.
+
+        Returns
+        -------
+        Generator[dict, dict, frozenset of int]
+            Yields waves and is sent their verdicts; returns the genotype
+            left, which an audit accepted.
+        """
+        after = good - frozenset(block)
+        if not fails:
+            verdict = (yield from self.evaluate([after], fresh=True))[after]
+            if verdict == ACCEPT:
+                return after
+        if len(block) == 1:
+            self.excluded.update(block)
+            return good
+        left, right = block[: len(block) // 2], block[len(block) // 2 :]
+        good = yield from self.sift(good, left, False)
+        # with all of the left half out, the right fails as the block did
+        fails = good == after | frozenset(right)
+        return (yield from self.sift(good, right, fails))
+
     def audit(self) -> typing.Generator[dict, dict, str]:
         """Re-evaluate the current genotype afresh and, if it fails, roll
-        back to the newest checkpoint that still passes.
+        back to the newest checkpoint that still passes; if
+        `audit_adaptive`, instead put back the sites that fail, by `sift`.
 
         Returns
         -------
@@ -396,6 +433,8 @@ class KnockoutSearch:
             `unresolved`, `recovered` or `exhausted_recovery`.
         """
         target = self.current
+        if self.audit_adaptive and target == self.checkpoints[self.audited]:
+            return "pass"  # an audit accepted it already
         self.phase = "audit"
         verdict = (yield from self.evaluate([target], fresh=True))[target]
         self.memory.observe(target, frozenset(), verdict)
@@ -409,32 +448,12 @@ class KnockoutSearch:
             return "unresolved"
         self.rollbacks += 1
         if self.audit_adaptive:
-            # the newest checkpoint that passes, by bisection: the last
-            # one audited does, and this one does not
-            chosen, bad = self.audited, len(self.checkpoints) - 1
-            while bad - chosen > 1:
-                mid = (chosen + bad) // 2
-                cp = self.checkpoints[mid]
-                if (yield from self.evaluate([cp], fresh=True))[cp] == ACCEPT:
-                    chosen = mid
-                else:
-                    bad = mid
-            # narrow what that commit deleted to a part that still fails,
-            # by halves, so that the rest of it may be deleted again
-            good = self.checkpoints[chosen]
-            mask = sorted(good - self.checkpoints[bad])
-            while len(mask) > 1:
-                halves = mask[: len(mask) // 2], mask[len(mask) // 2 :]
-                for half in halves:
-                    g = good - frozenset(half)
-                    if (yield from self.evaluate([g], fresh=True))[
-                        g
-                    ] != ACCEPT:
-                        mask = half
-                        break
-                else:
-                    break  # the halves pass apart: they fail only together
-            self.failed.append(good - frozenset(mask))
+            good = self.checkpoints[self.audited]
+            self.current = yield from self.sift(
+                good, sorted(good - target), True
+            )
+            self.checkpoints.append(self.current)
+            chosen = len(self.checkpoints) - 1
             self.audit_every = max(1, self.audit_every // 2)
         else:
             chosen = 0
@@ -443,9 +462,9 @@ class KnockoutSearch:
                 if (yield from self.evaluate([cp], fresh=True))[cp] == ACCEPT:
                     chosen = index
                     break
+            self.current = self.checkpoints[chosen]
+            self.checkpoints = self.checkpoints[: chosen + 1]
         self.audited = chosen
-        self.current = self.checkpoints[chosen]
-        self.checkpoints = self.checkpoints[: chosen + 1]
         self.transitions.append(
             (target, self.current, "rollback", "fresh_audit_rejected")
         )

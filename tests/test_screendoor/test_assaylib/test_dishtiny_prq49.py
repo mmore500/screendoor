@@ -205,7 +205,7 @@ def test_e2e_skeleton():
         "Global Anchor@5"
     ]
     # the sly instruction passes the search's test and fails an audit,
-    # which rolls it back: identity keeps nothing unaudited
+    # which puts it back: identity keeps nothing unaudited
     search = stages["identity:calculations"]["summary"]["search"]
     assert search["rollbacks"] == 1
     assert search["status"] == "complete_singleton_certificate"

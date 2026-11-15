@@ -60,9 +60,10 @@ fresh worlds (`identity_worlds`), each of which must end bit-identical to
 the wildtype's own competition against itself. Audits are costly, so
 they pace themselves (`audit_adaptive`): the first comes after four
 commits, each that passes doubles the wait, and each that fails halves
-it. A failed audit finds, by bisection, the commit that broke it and the
-part of that commit that still fails, rolls back to before it, and does
-not delete that part again. A final audit accepts the stage's result,
+it. A failed audit sifts what was deleted since the last audit that
+passed, by halves, as the screen shrinks a failing knockout: a part an
+audit accepts stays deleted, and a unit that fails alone goes back in,
+for good. Nothing rolls back. A final audit accepts the stage's result,
 which holds no commit unaudited.
 
 **Fitness confirmation.** The full-size confirmation is the costliest

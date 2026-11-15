@@ -284,7 +284,7 @@ certificate (checked by `test_matches_2026_11_03_implementation` and
 | `combination_rounds` | 2 | Rounds of union proposals after accepted masks |
 | `final_audit` | true (false with a sequential rule throughout) | Re-test the skeleton afresh before certifying it |
 | `audit_every` | 0 | Also audit after every this many commits (0: never) |
-| `audit_adaptive` | false | Audits pace themselves: one that passes doubles `audit_every`, one that fails halves it, finds the newest checkpoint that passes by bisection, and narrows the commit after it to a part that still fails, which is not deleted again. The result holds no commit unaudited. For a trial that tests an audit (`$fresh`) more strictly than the search |
+| `audit_adaptive` | false | Audits pace themselves: one that passes doubles `audit_every`, and one that fails halves it. A failed audit then sifts what was deleted since the last that passed, by halves: a part an audit accepts stays deleted, and a site that fails alone goes back in and is not deleted again. Nothing rolls back, and the result is the newest audited genotype, with no commit unaudited. For a trial that tests an audit (`$fresh`) more strictly than the search |
 | `max_rollbacks` | 2 | Failed audits tolerated before giving up |
 | `max_proposal_batches` | none | Stop (uncertified) after this many proposal batches |
 | `initial_knockout_size` | none | Sites per initial ddmin chunk (default: halves) |

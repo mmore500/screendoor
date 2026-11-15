@@ -446,11 +446,12 @@ def control_judge(kw, controls, replicates):
 
 @pytest.mark.parametrize("policy", ["hybrid", "ddmin"])
 @pytest.mark.parametrize("sly", [(), (4, 21), (4, 9, 21, 30, 33)])
-def test_adaptive_audits_pace_themselves_and_bisect_back(policy, sly):
+def test_adaptive_audits_pace_themselves_and_sift_failures(policy, sly):
     """The search's trials pass a knockout unless it takes an essential
     site; an audit's also reject one that takes a sly site. Audits come
-    seldom while they pass, and a failed one bisects back to the commit
-    that took the sly site."""
+    seldom while they pass, and a failed one sifts what was deleted since
+    the last that passed: the sly sites go back in, and the rest stays
+    out."""
     essential, sly = {2, 17, 25}, set(sly)
 
     def fake(t):
@@ -484,10 +485,18 @@ def test_adaptive_audits_pace_themselves_and_bisect_back(policy, sly):
         assert not rejected and s["rollbacks"] == 0
         assert len(audits) <= 2 + math.log2(max(len(commits), 1))
     else:
-        # a failed audit finds its sly site, which is not deleted again:
-        # about a rollback a site, each some bisections' worth of audits
+        # a failed audit finds its sly sites by halves, and they are not
+        # deleted again: a bisection's worth of audits a site
         assert 1 <= s["rollbacks"] <= len(sly)
-        assert len(audits) <= 16 * len(sly) + 8
+        assert len(audits) <= 2 * math.log2(36) * len(sly) + 8
+        # no search trial deletes a sly site after an audit put it back
+        seen = set()
+        for t in r["trials"]:  # in the order submitted
+            out = frozenset(range(36)) - decode_sites(t["key"]["retained"])
+            if "fresh" in t["key"]:
+                seen |= {i for i in sly if out == {i}}
+            else:
+                assert not out & seen
     # the last trial of all is the audit that accepts the skeleton
     last = max(audits, key=lambda t: t["key"]["fresh"])
     assert last["result"]["accept"]
