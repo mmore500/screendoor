@@ -24,6 +24,14 @@ def _until_closed(dispatchdir, timeout=60):
     raise AssertionError("dispatch never completed")
 
 
+def _wait_until(condition, timeout=30):
+    """Poll until `condition()` holds, and return whether it came to."""
+    deadline = time.time() + timeout
+    while not condition() and time.time() < deadline:
+        time.sleep(0.05)
+    return condition()
+
+
 def test_subprocess_end_to_end(dispatchdir):
     submit_dispatch(
         {
@@ -117,10 +125,7 @@ def test_throttle_counts_running_batches(dispatchdir):
     assert not throttle(max_procs=2)(ctx.hook_ctx)
     assert throttle(max_procs=3)(ctx.hook_ctx)
     kill_dispatch(dispatchdir)
-    deadline = time.time() + 10
-    while not throttle(max_procs=1)(ctx.hook_ctx) and time.time() < deadline:
-        time.sleep(0.05)
-    assert throttle(max_procs=1)(ctx.hook_ctx)
+    assert _wait_until(lambda: throttle(max_procs=1)(ctx.hook_ctx))
 
 
 def test_kill_stops_the_trial_processes(dispatchdir):
@@ -143,16 +148,21 @@ def test_kill_stops_the_trial_processes(dispatchdir):
     (ctx,) = run_tick_once(dispatchdir)
     (t,) = ctx.read_trials()
     script_pidfile = os.path.join(ctx.trial_dir(t["trial_uuid"]), "pid")
-    while not os.path.exists(script_pidfile):  # wait for the script
-        time.sleep(0.05)
-    with open(script_pidfile) as fh:
-        script_pid = int(fh.read())
+
+    def script_pid():  # None until the script has written it whole
+        try:
+            with open(script_pidfile) as fh:
+                text = fh.read()
+        except FileNotFoundError:
+            return None
+        return int(text) if text.endswith("\n") else None
+
+    assert _wait_until(lambda: script_pid() is not None)
+    script = f"/proc/{script_pid()}"
     kill_dispatch(dispatchdir)
-    deadline = time.time() + 10
-    while os.path.exists(f"/proc/{script_pid}") and time.time() < deadline:
-        time.sleep(0.05)
-    assert not os.path.exists(f"/proc/{script_pid}")  # the script itself
-    assert not is_alive(pidfile(ctx.hook_ctx, t["job"]))
+    # the script itself, and the batch around it, which ends after it
+    assert _wait_until(lambda: not os.path.exists(script))
+    assert _wait_until(lambda: not is_alive(pidfile(ctx.hook_ctx, t["job"])))
     (t,) = ctx.read_trials()
     assert (t["status"], t["kills"], t["result"]) == ("killed", 1, None)
     assert run_tick_once(dispatchdir, force=True) == []

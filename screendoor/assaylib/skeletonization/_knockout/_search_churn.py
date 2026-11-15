@@ -16,6 +16,7 @@ SEARCH_KWARGS = (
     "exact",
     "final_audit",
     "audit_every",
+    "audit_adaptive",
     "max_rollbacks",
     "max_proposal_batches",
     "initial_knockout_size",

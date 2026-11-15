@@ -284,6 +284,7 @@ certificate (checked by `test_matches_2026_11_03_implementation` and
 | `combination_rounds` | 2 | Rounds of union proposals after accepted masks |
 | `final_audit` | true (false with a sequential rule throughout) | Re-test the skeleton afresh before certifying it |
 | `audit_every` | 0 | Also audit after every this many commits (0: never) |
+| `audit_adaptive` | false | Audits pace themselves: one that passes doubles `audit_every`, one that fails halves it, finds the newest checkpoint that passes by bisection, and narrows the commit after it to a part that still fails, which is not deleted again. The result holds no commit unaudited. For a trial that tests an audit (`$fresh`) more strictly than the search |
 | `max_rollbacks` | 2 | Failed audits tolerated before giving up |
 | `max_proposal_batches` | none | Stop (uncertified) after this many proposal batches |
 | `initial_knockout_size` | none | Sites per initial ddmin chunk (default: halves) |
@@ -395,7 +396,18 @@ keeps failing with more sites out. It runs in three stages.
 3. **Confirmation.** Sort the pool from least to most costly and find,
    by bisection, the longest prefix whose knockout the
    [`sprt`](#sequential-rules) rule accepts against the wildtype
-   controls. These few tests carry the whole `error_rate`.
+   controls. These few tests carry the whole `error_rate`. With
+   `reconfirm`, a knockout the rule accepts is judged a second time, on
+   the scores of a costlier trial (a larger or longer run, say) against
+   controls scored the same way, and is accepted only if it passes both.
+   The costlier test paces itself: the bisection is by the first
+   confirmation, and the costlier one judges the longest prefix accepted
+   so far after every `every` that the first accepts, and where the
+   bisection ends, so that nothing is deleted that it has not accepted.
+   A prefix it rejects becomes the bisection's upper bound. With `every`
+   0 it judges only where the bisection ends: one costlier test where
+   the two agree. With `adaptive`, each prefix it accepts doubles
+   `every`, and each it rejects halves it.
 
 **Redundant, or adding up?** A screen that detects a loss of some size
 also fails when smaller losses add up to it, so a minimal failing set of
@@ -428,7 +440,9 @@ cheapest), and passes if it sends `true` or `{"accept": true}`: the
 knockout shows no large failure. A long trial gets no `$screen` and sends
 a score, as a number or `{"score": ..., "viable": ...}`. A ranking sample
 that is not viable is skipped and counted in `stats.nonviable`. Screens
-run once each: a screen that misreads is not allowed for.
+run once each: a screen that misreads is not allowed for. A
+reconfirmation's trials and its controls get `$reconfirm`, set to 1, and
+the `env` and `cmd` of `reconfirm`.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -443,14 +457,17 @@ run once each: a screen that misreads is not allowed for.
 | `rel_tol`, `abs_tol`, `require_atleast` | 0, 0, `[]` | The margin, as above; a result under the wildtype in a `require_atleast` field is not viable |
 | `error_rate`, `indifference`, `futility`, `max_replicates` | | The `sprt` rule's, as above |
 | `planned_tests` | 16 | As above; the confirmation makes about `log2` of the pool |
+| `reconfirm` | none | A second confirmation, by a costlier trial: its `num_control_trials` (2 or more), its own `env` and `cmd` over the dispatch's, how many of the first's acceptances pass between its tests (`every`, default 1; 0 tests only the prefix the first settles on), whether that count doubles after each test that passes and halves after each that fails (`adaptive`, default false), and any of `replicates`, `rel_tol`, `abs_tol`, `error_rate`, `indifference`, `futility` and `max_replicates` to use in place of the first's |
 | `search_seed` | the dispatch's `meta_seed` | Seed of the search's own RNG |
 
 The summary gives the `critical` sites, the `redundant_sets` and the
 sets found `adding_up`, with the screen that found each, the sites `kept`
 and `released`, whether the whole pool passes the first screen
 (`pool_certified`), the `ranking` from least to most costly with its
-`effects` and their standard error, the `predicted_cutoff`, each of the
-`confirmations`, and `stats`. It claims no single-deletion minimality:
+`effects` and their standard error (`effects_error`, null for a pool too
+small to rank), the `predicted_cutoff`, each of the
+`confirmations` (with its `reconfirm_replicates`, if it got that far),
+and `stats`. It claims no single-deletion minimality:
 deleted sites are those the ranking put first, up to the margin.
 
 The search takes many waves, about 50 to 200 on the toys below, as each

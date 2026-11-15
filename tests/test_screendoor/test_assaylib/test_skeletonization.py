@@ -424,6 +424,7 @@ def test_gama_dispatch_reports_stages_and_keeps_best_when_out_of_budget():
 
 from screendoor.assaylib.skeletonization._knockout._controls import (  # noqa: E402
     Controls,
+    beta_quantile,
     rank_pvalue,
     t_cdf,
     t_quantile,
@@ -441,6 +442,72 @@ def control_judge(kw, controls, replicates):
         return c.accepts(scores, "detectable_loss", alpha)
 
     return judge, {**c.summary(), "threshold": threshold}
+
+
+@pytest.mark.parametrize("policy", ["hybrid", "ddmin"])
+@pytest.mark.parametrize("sly", [(), (4, 21), (4, 9, 21, 30, 33)])
+def test_adaptive_audits_pace_themselves_and_bisect_back(policy, sly):
+    """The search's trials pass a knockout unless it takes an essential
+    site; an audit's also reject one that takes a sly site. Audits come
+    seldom while they pass, and a failed one bisects back to the commit
+    that took the sly site."""
+    essential, sly = {2, 17, 25}, set(sly)
+
+    def fake(t):
+        out = frozenset(range(36)) - decode_sites(t["env"]["retained"])
+        strict = "fresh" in t["key"]
+        return {"accept": not out & (essential | sly if strict else essential)}
+
+    r = simulate_dispatch(
+        f"scd.assaylib.skeletonization.{policy}.make_churn("
+        "num_control_trials=1)",
+        {
+            "n_sites": 36,
+            "cmd": "x",
+            "search_seed": 3,
+            "audit_every": 2,
+            "audit_adaptive": True,
+            "max_rollbacks": 100,
+        },
+        fake_trial=fake,
+    )
+    assert r["completed"]["outcome"] == "succeeded", r["completed"]
+    s = r["completed"]["summary"]
+    assert s["status"] == "complete_singleton_certificate" and s["certified"]
+    assert decode_sites(s["retained"]) == essential | sly
+    audits = [t for t in r["trials"] if "fresh" in t["key"]]
+    rejected = [t for t in audits if not t["result"]["accept"]]
+    commits = [x for x in s["transitions"] if x["kind"] == "deletion"]
+    assert len(s["transitions"]) - len(commits) == s["rollbacks"]
+    if not sly:
+        # nothing fails: the audits thin out as the commits go by
+        assert not rejected and s["rollbacks"] == 0
+        assert len(audits) <= 2 + math.log2(max(len(commits), 1))
+    else:
+        # a failed audit finds its sly site, which is not deleted again:
+        # about a rollback a site, each some bisections' worth of audits
+        assert 1 <= s["rollbacks"] <= len(sly)
+        assert len(audits) <= 16 * len(sly) + 8
+    # the last trial of all is the audit that accepts the skeleton
+    last = max(audits, key=lambda t: t["key"]["fresh"])
+    assert last["result"]["accept"]
+    assert decode_sites(last["key"]["retained"]) == essential | sly
+
+
+def test_beta_quantile_matches_known_values():
+    # uniform, and the arcsine distribution's quartile
+    assert beta_quantile(0.3, 1.0, 1.0) == pytest.approx(0.3, abs=1e-12)
+    assert beta_quantile(0.25, 0.5, 0.5) == pytest.approx(
+        math.sin(math.pi / 8) ** 2, abs=1e-9
+    )
+    # a symmetric distribution's median, and mirrored tails
+    assert beta_quantile(0.5, 7.0, 7.0) == pytest.approx(0.5, abs=1e-12)
+    low, high = beta_quantile(0.01, 3.0, 5.0), beta_quantile(0.99, 5.0, 3.0)
+    assert low == pytest.approx(1.0 - high, abs=1e-9)
+    with pytest.raises(ValueError):
+        beta_quantile(0.0, 1.0, 1.0)
+    with pytest.raises(ValueError):
+        beta_quantile(0.5, 0.0, 1.0)
 
 
 @pytest.mark.parametrize(

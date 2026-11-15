@@ -32,7 +32,7 @@ with none: one that failed, or sent no `payload`.
 
 | Action | Effect |
 |---|---|
-| `scd.churn.launch([{"key", "cmd", "env"}, ...])` | submit trials; a key already submitted is dropped |
+| `scd.churn.launch([{"key", "cmd", "env", "weight"}, ...])` | submit trials; a key already submitted is dropped. `weight` (optional, default 1) is how much of `trial_batchsize` the trial takes up |
 | `scd.churn.memo(data)` | record state for the next call |
 | `scd.churn.succeed(summary)`, `fail(reason)` | complete the dispatch |
 | `scd.churn.progress(done, total, message=None)`, `eta(when)` | notify |
@@ -89,7 +89,7 @@ Avida.
 | `meta_project`, `meta_experiment`, `meta_treatment`, `meta_user` | `"default"` | labels |
 | `meta_redo` | `"0"` | label; bump it to run the same labels again |
 | `meta_seed` | random | integer |
-| `trial_batchsize` | 1 | trials per job (array task) |
+| `trial_batchsize` | 1 | trials per job (array task); the most total `weight`, for trials that give one |
 | `trial_batch_timeout` | none | seconds per job, enforced by the orchestrator |
 | `trial_maxretry` | 3 | relaunches of a trial whose job vanished |
 | `churn_maxretry` | 5 | retries of a churn call that raised, before the dispatch fails |

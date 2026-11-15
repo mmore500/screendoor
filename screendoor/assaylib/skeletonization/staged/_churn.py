@@ -1,3 +1,4 @@
+import math
 import typing
 
 from .... import churn as scd_churn
@@ -31,6 +32,11 @@ def _trial(kw: dict, n: int, request: tuple) -> dict:
     if stage in ("confirm", "jackknife"):
         key[stage] = 1  # fresh scores, apart from the ranking's
     env = _trial_env(kw, n, retained, index[0])
+    if stage in ("recontrol", "reconfirm"):  # the costlier trial
+        again = kw["reconfirm"]
+        key["reconfirm"] = 1
+        env = {**env, **again.get("env", {}), "reconfirm": "1"}
+        return {"key": key, "cmd": again.get("cmd", kw["cmd"]), "env": env}
     return {"key": key, "cmd": kw["cmd"], "env": env}
 
 
@@ -80,7 +86,10 @@ def _summary(
         "pool_certified": result["certified"],
         "ranking": result["ranking"],
         "effects": result["effects"],
-        "effects_error": result["error"],
+        # infinite if the ranking took no trials: a pool of one site
+        "effects_error": (
+            result["error"] if math.isfinite(result["error"]) else None
+        ),
         "predicted_cutoff": result["predicted_cutoff"],
         "confirmations": result["confirmations"],
         "stats": result["stats"],
@@ -91,6 +100,13 @@ def _summary(
             "stage": search.sequential.summary("sprt"),
         },
     }
+    if search.reconfirm is not None:
+        summary["reconfirm_every"] = result["reconfirm_every"]
+        summary["reconfirm_control"] = {
+            **search.recontrols.summary(),
+            "margin": search.recontrols.margin,
+            "stage": search.resequential.summary("sprt"),
+        }
     if "sequence" in kw:
         summary["skeleton"] = _masked_sequence(kw, retained)
     return summary

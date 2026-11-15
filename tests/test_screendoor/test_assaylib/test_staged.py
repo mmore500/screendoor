@@ -301,6 +301,93 @@ def test_ranking_skips_samples_that_are_not_viable():
     assert result["retained"] & {1, 2, 3, 4}  # never all four deleted
 
 
+def test_reconfirm_judges_an_accepted_knockout_by_costlier_trials():
+    """The costlier trial sees three times each weak site's loss, so it
+    accepts fewer deleted than the confirmation alone does."""
+    costs = dict.fromkeys(range(20, 30), 0.012)
+    toy = Toy(50, critical={3}, costs=costs)
+
+    def run(toy=toy, **kw):
+        kw = {"abs_tol": 0.06, **kw}
+        search = StagedSearch(toy.n, kw, seed=1, num_control_trials=40)
+        gen, answers, asked = search.run(), None, []
+        while True:
+            try:
+                wave = gen.send(answers)
+            except StopIteration as stop:
+                return search, stop.value, asked
+            asked += wave
+            answers = []
+            for kind, stage, deleted, *index in wave:
+                if kind == "screen":
+                    answers.append(toy.fails(deleted, stage))
+                    continue
+                rng = random.Random(f"{stage}:{sorted(deleted)}:{index}")
+                scale = 3.0 if stage in ("reconfirm", "recontrol") else 1.0
+                answers.append(
+                    -scale * toy.loss(deleted) + rng.gauss(0.0, 0.02)
+                )
+
+    _, alone, asked = run()
+    assert not any(r[1] in ("recontrol", "reconfirm") for r in asked)
+    assert all("reconfirm_replicates" not in c for c in alone["confirmations"])
+    search, both, asked = run(reconfirm={"num_control_trials": 30})
+    recontrols = [r for r in asked if r[1] == "recontrol"]
+    assert sorted(r[3] for r in recontrols) == list(range(30))
+    assert all(r[2] == frozenset() for r in recontrols)
+    assert search.recontrols.n == 30 and search.controls.n == 40
+    deleted = frozenset(range(50)) - both["retained"]
+    assert len(deleted) < 50 - len(alone["retained"])
+    assert 3.0 * toy.loss(deleted) <= 0.06
+    # a knockout the first confirmation rejects is not reconfirmed
+    again = [c for c in both["confirmations"] if "reconfirm_replicates" in c]
+    assert again and any(not c["accepted"] for c in again)
+    reconfirmed = {r[2] for r in asked if r[1] == "reconfirm"}
+    assert len(reconfirmed) == len(again)
+    with pytest.raises(ValueError, match="num_control_trials"):
+        run(reconfirm={})
+    # with `every` 0, the costlier trials judge only the prefix the
+    # first confirmation settles on, and it searches again below what
+    # they reject
+    search, late, asked = run(reconfirm={"num_control_trials": 30, "every": 0})
+    assert late["retained"] == both["retained"]
+    rounds = late["confirmations"]
+    first = next(i for i, c in enumerate(rounds) if "replicates" not in c)
+    assert rounds[first]["deleted"] == 50 - len(alone["retained"])
+    assert not rounds[first]["accepted"]
+    below = [c["deleted"] for c in rounds[first + 1 :]]
+    assert below and max(below) < rounds[first]["deleted"]
+    assert search.reconfirm_every == 0
+    # adaptive, a costlier test that fails halves the wait, and one that
+    # passes doubles it
+    again = {"num_control_trials": 30, "every": 4, "adaptive": True}
+    search, paced, asked = run(reconfirm=again)
+    assert paced["retained"] == both["retained"]
+    costlier = [
+        c for c in paced["confirmations"] if "reconfirm_replicates" in c
+    ]
+    verdicts = [c["accepted"] for c in costlier]
+    assert True in verdicts and False in verdicts
+    # what is deleted is the longest knockout the costlier test accepted
+    assert 50 - len(paced["retained"]) == max(
+        c["deleted"] for c in costlier if c["accepted"]
+    )
+    every = 4
+    for accepted in verdicts:
+        every = every * 2 if accepted else max(1, every // 2)
+    assert search.reconfirm_every == paced["reconfirm_every"] == every
+    # where the two agree, a search of few acceptances takes one costlier
+    # test, however it waits
+    harmless = Toy(40, critical={3})
+    for every in (0, 1, 8):
+        again = {"num_control_trials": 30, "every": every}
+        _, same, asked = run(harmless, reconfirm=again)
+        assert same["retained"] == {3}
+        assert len({r[2] for r in asked if r[1] == "reconfirm"}) == 1
+    with pytest.raises(ValueError, match="every"):
+        run(reconfirm={"num_control_trials": 30, "every": -1})
+
+
 @pytest.mark.parametrize(
     "kw",
     [
@@ -410,6 +497,25 @@ def test_staged_churn_is_pure_and_replayable():
     assert all(json.dumps(t["key"], sort_keys=True) in keys for t in asked)
 
 
+def test_staged_dispatch_of_a_pool_of_one_site():
+    def fake(t):
+        out = frozenset(range(2)) - decode_sites(t["env"]["retained"])
+        if "screen" in t["env"]:
+            return 0 not in out
+        rng = random.Random(json.dumps(t["key"], sort_keys=True))
+        return rng.gauss(0.0, 0.02)
+
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.staged",
+        {**KW, "n_sites": 2},
+        fake_trial=fake,
+    )
+    assert r["completed"]["outcome"] == "succeeded", r["completed"]
+    s = r["completed"]["summary"]
+    assert s["critical"] == "0" and s["retained"] == "0"
+    assert s["effects_error"] is None and s["stats"]["ranking_trials"] == 0
+
+
 def test_staged_screens_take_their_own_cmd_and_env():
     seen = set()
 
@@ -439,6 +545,38 @@ def test_staged_screens_take_their_own_cmd_and_env():
         ("long", "1", "full"),
         ("long", None, "full"),
     }
+
+
+def test_staged_reconfirmation_takes_its_own_env_and_controls():
+    def fake(t):
+        costly = "reconfirm" in t["key"]
+        assert t["env"].get("size") == ("big" if costly else None)
+        assert t["env"].get("reconfirm") == ("1" if costly else None)
+        return fake_trial(t)
+
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.staged",
+        {
+            **KW,
+            "reconfirm": {
+                "num_control_trials": 20,
+                "env": {"size": "big"},
+                "cmd": "y",
+            },
+        },
+        fake_trial=fake,
+    )
+    assert r["completed"]["outcome"] == "succeeded", r["completed"]
+    s = r["completed"]["summary"]
+    assert s["reconfirm_control"]["n"] == 20 and s["control"]["n"] == 40
+    assert s["confirmations"][-1]["reconfirm_replicates"] > 0
+    again = [t for t in r["trials"] if "reconfirm" in t["key"]]
+    assert all(t["request"]["cmd"] == "y" for t in again)
+    controls = [t["key"] for t in again if t["key"]["retained"] == "0-29"]
+    assert sorted(k["replicate"] for k in controls) == list(range(20))
+    assert len(again) > 20
+    plain = [t for t in r["trials"] if "reconfirm" not in t["key"]]
+    assert all(t["request"]["cmd"] == "x" for t in plain)
 
 
 @pytest.mark.parametrize(

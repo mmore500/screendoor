@@ -102,6 +102,41 @@ def t_quantile(p: float, df: float) -> float:
     return (lo + hi) / 2.0
 
 
+def beta_quantile(p: float, a: float, b: float) -> float:
+    """Evaluate the beta distribution's quantile function, by bisection.
+
+    Parameters
+    ----------
+    p : float
+        A probability, strictly between 0 and 1.
+    a : float
+        The first shape parameter, positive.
+    b : float
+        The second shape parameter, positive.
+
+    Returns
+    -------
+    float
+        The value `x` that a beta variable is at most with probability
+        `p`.
+
+    Raises
+    ------
+    ValueError
+        If `p`, `a` or `b` is out of range.
+    """
+    if not 0.0 < p < 1.0 or a <= 0 or b <= 0:
+        raise ValueError("beta_quantile needs 0 < p < 1, a > 0 and b > 0")
+    lo, hi = 0.0, 1.0
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        if _betainc(a, b, mid) < p:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
 def _gammainc(a: float, x: float) -> float:
     """Evaluate the regularized lower incomplete gamma function P(a, x)."""
     if x <= 0.0:

@@ -26,6 +26,18 @@ def test_launch_validates():
         scd_churn.launch([{"key": {1, 2}, "cmd": "x"}])
     with pytest.raises(ValueError, match="unknown"):
         scd_churn.launch([{"key": 1, "cmd": "x", "bogus": 1}])
+    (t,) = scd_churn.launch([{"key": 1, "cmd": "x", "weight": 2.5}])["kwargs"][
+        "trials"
+    ]
+    assert t["weight"] == 2.5
+    (t,) = scd_churn.launch([{"key": 1, "cmd": "x"}])["kwargs"]["trials"]
+    assert "weight" not in t
+    with pytest.raises(TypeError):
+        scd_churn.launch([{"key": 1, "cmd": "x", "weight": "2"}])
+    with pytest.raises(TypeError):
+        scd_churn.launch([{"key": 1, "cmd": "x", "weight": True}])
+    with pytest.raises(ValueError):
+        scd_churn.launch([{"key": 1, "cmd": "x", "weight": 0}])
 
 
 def test_constructors():

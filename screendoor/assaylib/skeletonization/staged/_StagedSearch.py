@@ -41,7 +41,10 @@ class StagedSearch:
        until another deleted site would cost over `site_value` of them.
     3. **Confirmation.** Sort the pool from least to most costly and find,
        by bisection, the longest prefix whose knockout the `sprt` rule
-       accepts against the wildtype controls.
+       accepts against the wildtype controls. With `reconfirm`, a knockout
+       that is accepted must pass the rule a second time, on the scores
+       of a costlier trial against controls of its own; that test comes
+       after every `every` acceptances, and at the end.
 
     Parameters
     ----------
@@ -70,6 +73,13 @@ class StagedSearch:
         self.batch_size = int(kw.get("batch_size", 20))
         self.max_set_size = int(kw.get("max_set_size", 6))
         self.jackknife_replicates = int(kw.get("jackknife_replicates", 4))
+        self.reconfirm = kw.get("reconfirm")  # a second confirmation
+        # how many first confirmations pass between second ones; 0, all
+        self.reconfirm_every = (
+            0
+            if self.reconfirm is None
+            else int(self.reconfirm.get("every", 1))
+        )
         self.max_ranking_trials = int(kw.get("max_ranking_trials", 3200))
         self.site_value = float(kw.get("site_value", 400))
         if min(self.n_screens, self.batch_size, self.max_set_size) < 1:
@@ -78,6 +88,8 @@ class StagedSearch:
             )
         if self.jackknife_replicates < 1:
             raise ValueError("jackknife_replicates must be positive")
+        if self.reconfirm_every < 0:
+            raise ValueError("reconfirm's every must not be negative")
         self.sites = list(range(n_sites))
         self.kw = kw
         self.seed = seed
@@ -603,9 +615,12 @@ class StagedSearch:
             cutoff += 1
         return order, effects, error, cutoff
 
-    def stream(self, deleted: frozenset[int]) -> Wave:
-        """Judge a knockout by the `sprt` rule against the controls, look
-        by look, the looks doubling up to `max_replicates`.
+    def stream(self, deleted: frozenset[int], stage: str = "confirm") -> Wave:
+        """Judge a knockout's `stage` scores by the `sprt` rule, look by
+        look, from the first look's scores and doubling up to
+        `max_replicates`: its `confirm` scores against the controls, or
+        its `reconfirm` scores, of the costlier trial, against that
+        trial's own.
 
         Returns
         -------
@@ -613,23 +628,24 @@ class StagedSearch:
             Yields waves and is sent their answers; returns whether the
             knockout is accepted.
         """
-        test = self.sequential
+        again = stage == "reconfirm"
+        test = self.resequential if again else self.sequential
+        first = self.refirst_look if again else self.first_look
         alpha = test.alpha(len(self.confirmations))
-        total, verdict = min(self.first_look, test.max_replicates), None
+        total, verdict = min(first, test.max_replicates), None
         while True:
-            scores = yield [
-                ("score", "confirm", deleted, r) for r in range(total)
-            ]
+            scores = yield [("score", stage, deleted, r) for r in range(total)]
             if None not in scores:
                 verdict = test.judge(scores, "sprt", alpha)
             if None in scores or verdict or total >= test.max_replicates:
                 break
             total = min(2 * total, test.max_replicates)
+        counted = "reconfirm_replicates" if again else "replicates"
         self.confirmations.append(
             {
                 "deleted": len(deleted),
+                counted: total,
                 "accepted": verdict == ACCEPT,
-                "replicates": total,
             }
         )
         return verdict == ACCEPT
@@ -638,6 +654,13 @@ class StagedSearch:
         """Find the longest prefix of `order` whose knockout is accepted,
         by bisection from the predicted `cutoff`.
 
+        With `reconfirm`, the bisection is by the first confirmation, and
+        the costlier one judges the longest prefix accepted so far after
+        every `every` that the first accepts, and where the bisection
+        ends. A prefix it rejects becomes the bisection's upper bound,
+        over the longest it has accepted. If `adaptive`, each prefix it
+        accepts doubles `every`, and each it rejects halves it.
+
         Returns
         -------
         Generator[list, list, frozenset of int]
@@ -645,14 +668,28 @@ class StagedSearch:
             delete.
         """
         lo, hi = 0, len(order) + 1  # the prefix lo passes, hi fails
+        sure, unsure = 0, 0  # the prefix reconfirmed; acceptances since
+        adaptive = (self.reconfirm or {}).get("adaptive")
         probe = min(max(cutoff, 1), len(order))
-        while hi - lo > 1:
-            if (yield from self.stream(frozenset(order[:probe]))):
-                lo = probe
-            else:
-                hi = probe
-            probe = (lo + hi) // 2
-        return frozenset(order[:lo])
+        while True:
+            every = self.reconfirm_every
+            while hi - lo > 1 and not (every and unsure >= every):
+                if (yield from self.stream(frozenset(order[:probe]))):
+                    lo, unsure = probe, unsure + 1
+                else:
+                    hi = probe
+                probe = (lo + hi) // 2
+            if self.reconfirm is None or lo == sure:
+                return frozenset(order[:lo])
+            prefix = frozenset(order[:lo])
+            if (yield from self.stream(prefix, "reconfirm")):
+                sure = lo
+                self.reconfirm_every *= 2 if adaptive else 1
+            else:  # backtrack, below the prefix it rejected
+                lo, hi = sure, lo
+                if adaptive:
+                    self.reconfirm_every = max(1, every // 2)
+            unsure, probe = 0, (lo + hi) // 2
 
     def run(self) -> Wave:
         """Run the search: the controls, the screens, the ranking and the
@@ -664,7 +701,8 @@ class StagedSearch:
             Yields waves and is sent their answers; returns the result:
             `retained`, `critical`, `redundant`, `adding_up`, `kept`,
             `released`, `certified`, `ranking`, `effects`, `error`,
-            `predicted_cutoff`, `confirmations` and `stats`.
+            `predicted_cutoff`, `confirmations`, `reconfirm_every` (as
+            the search left it) and `stats`.
 
         Raises
         ------
@@ -673,17 +711,35 @@ class StagedSearch:
             not accept a harmless deletion.
         """
         self.phase = "controls"
+        again = self.reconfirm or {}
+        recontrols = int(again.get("num_control_trials", 0))
+        if self.reconfirm is not None and recontrols < 2:
+            raise ValueError("reconfirm needs 2 or more num_control_trials")
         scores = yield [
             ("score", "control", frozenset(), r)
             for r in range(self.num_control_trials)
-        ]
+        ] + [("score", "recontrol", frozenset(), r) for r in range(recontrols)]
         if None in scores:
             raise ValueError("a wildtype control was not viable")
         kw = {"planned_tests": 16, **self.kw}
+        scores, rescores = (
+            scores[: self.num_control_trials],
+            scores[self.num_control_trials :],
+        )
         self.controls = Controls(kw, scores)
         self.sequential = SequentialTest(kw, self.controls, len(self.sites))
         harmless = self.sequential.summary("sprt")["harmless_replicates"]
         self.first_look = int(kw.get("replicates", harmless))
+        if self.reconfirm is not None:
+            # the kwargs, less the first look's, under the reconfirmation's
+            rekw = {k: v for k, v in kw.items() if k != "replicates"}
+            rekw.update(again)
+            self.recontrols = Controls(rekw, rescores)
+            self.resequential = SequentialTest(
+                rekw, self.recontrols, len(self.sites)
+            )
+            harmless = self.resequential.summary("sprt")["harmless_replicates"]
+            self.refirst_look = int(rekw.get("replicates", harmless))
         # what the sprt can accept: its margin less half its zone
         self.usable = (
             self.controls.mean
@@ -708,5 +764,6 @@ class StagedSearch:
             "error": error,
             "predicted_cutoff": cutoff,
             "confirmations": self.confirmations,
+            "reconfirm_every": self.reconfirm_every,
             "stats": self.stats,
         }

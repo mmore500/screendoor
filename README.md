@@ -29,7 +29,7 @@ Churn is pure: records in, actions out.
 Every side effect is a hook, and no hook has a default: a dispatch sets all of its hooks; the dispatchdir's `dispatch_hooks.json` sets the daemon's.
 
 screendoor is standard library only, Python 3.10+.
-Built-in assays cover smoke tests, potentiation scans and skeletonization (jenga, ddmin, Minesweeper, hybrid, GAMA and staged); see [docs/skeletonization.md](docs/skeletonization.md).
+Built-in assays cover smoke tests, potentiation scans and skeletonization (jenga, ddmin, Minesweeper, hybrid, GAMA and staged); see [docs/skeletonization.md](docs/skeletonization.md). [docs/dishtiny_prq49.md](docs/dishtiny_prq49.md) covers an end-to-end skeletonization of DISHTINY genomes.
 Trials run as local processes or as Slurm array jobs.
 See [docs/guide.md](docs/guide.md) for writing assays, every dispatch setting and hook, trials, the daemon, storage and orchestrators.
 
