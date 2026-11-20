@@ -8,7 +8,8 @@
   the genome's share of cells as `score`.
 * `screen`: one such competition. Sends `accept`, false if the genome's
   share is not over `$DISHTINY_SCREEN_PASS`, or it is extinct: the
-  knockout is lethal.
+  knockout is lethal. With `$DISHTINY_SCREEN_CEILING`, false too if its
+  share is not under that: the knockout takes the world over.
 * `identity`: first rundishtiny's own divergence test, at each
   `[updates, cells, kill_seconds]` of `$DISHTINY_DIVERGENCE`: the genome
   and the wildtype, each alone in a world, side by side until they
@@ -184,13 +185,15 @@ def score(knockout: set[int]) -> dict:
 
 def screen(knockout: set[int]) -> dict:
     """Compete on a world of the trial's own, and fail a genome whose
-    share of cells is not over `$DISHTINY_SCREEN_PASS`, or is none. A run
-    that had to be killed fails nothing."""
+    share of cells is not over `$DISHTINY_SCREEN_PASS`, or is none, or is
+    not under `$DISHTINY_SCREEN_CEILING`, if that is set. A run that had
+    to be killed fails nothing."""
     result = score(knockout)
     if "inconclusive" in result:
         return {**result, "accept": True}
     least = max(float(os.environ["DISHTINY_SCREEN_PASS"]), 0.0)
-    return {**result, "accept": result["score"] > least}
+    most = float(os.environ.get("DISHTINY_SCREEN_CEILING", "inf"))
+    return {**result, "accept": least < result["score"] < most}
 
 
 def identity(knockout: set[int], worlds: list[list[int]]) -> dict:

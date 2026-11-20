@@ -2,6 +2,7 @@
 statically dead code, knock out what leaves competitions bit-identical,
 then what costs no fitness. See docs/dishtiny_prq49.md."""
 
+import itertools
 import json
 from statistics import fmean
 import typing
@@ -40,6 +41,7 @@ DEFAULTS = {
     "cmd": "python3 -m screendoor.assaylib.dishtiny_prq49.run_trial",
     "env": {},
     "stages": STAGES,
+    "knockout": "",  # positions out before the first stage, as `0-5,9`
     "small": [12288, 36],  # updates, cells: 1.5 group lifetimes
     "screen": [8192, 576],  # one lifetime, on a world no control dies out of
     "full": [24576, 1024],  # three group lifetimes
@@ -54,8 +56,9 @@ DEFAULTS = {
     # they differ, which most knockouts that show do in a second
     "divergence": [[2048, 100], [8192, 100]],
     # the size of each world an identity audit then competes in, against
-    # the wildtype, cheapest first
-    "identity_worlds": [[12288, 36]] * 4 + [[24576, 64]] * 2,
+    # the wildtype, cheapest first: the same worlds in every audit, each
+    # size's at once, and a size only if those before it all pass
+    "identity_worlds": [[12288, 36]] * 8 + [[24576, 400]] * 8,
     "identity": {},
     "fitness": {},
     "reconfirm": {},
@@ -194,6 +197,18 @@ def _await(by_key: dict, trials: list[dict]) -> tuple[list[dict], list | None]:
     return launch, [result for _, result in found]
 
 
+def _control(by_key: dict, size: str, replicate: int, count: int) -> dict:
+    """Give the key of the trial that is wildtype control `replicate`, of
+    `count`, at a size: its own or, where that was inconclusive, the
+    trial run in its place, `count` replicates on."""
+    while True:
+        key = {"control": size, "replicate": replicate}
+        result = by_key.get(canonical_json(key), {}).get("result")
+        if not (isinstance(result, dict) and "inconclusive" in result):
+            return key
+        replicate += count
+
+
 def _strip(kw: dict, name: str, knockout: set, by_key: dict) -> Stage:
     """Run the static pruner on the genome so far, and take its nops."""
     trial = _trial(
@@ -287,29 +302,29 @@ def _identity(
     # the search's test: two worlds side by side, killed if still
     # running at twice one's time
     first = [[*size, 2 * _run_seconds(size, kw)] for size in kw["divergence"]]
-    # an audit's: each world's competition, and the wildtype's own
-    sizes = kw["identity_worlds"]
-    limits = [_run_seconds(size, kw) for size in sizes]
     cheap = sum(kill for _, _, kill in first)
-    costly = 2 * sum(limit + kw["overhead_seconds"] for limit in limits)
+    # an audit's: that test, and a trial for each world, of its
+    # competition and the wildtype's own. Each size is a tier
+    sizes = kw["identity_worlds"]
+    tiers = [len(list(same)) for _, same in itertools.groupby(sizes)]
+    tiers[0] += 1
 
     def wrap(t: dict) -> dict:
         out = decode_sites(t["env"]["knockout"])
-        audit = t["key"].get("fresh", 0)  # each audit draws new worlds
-        seed = kw["world_seed"] + 100000 * audit
-        seed += 1000 * t["key"]["replicate"]
-        worlds = [
-            [*size, seed + i, limit]
-            for i, (size, limit) in enumerate(zip(sizes, limits))
-        ]
+        world = t["key"]["replicate"] - 1 if "fresh" in t["key"] else -1
+        worlds, weight = [], cheap
+        if world >= 0:  # every audit is in the same worlds
+            limit = _run_seconds(sizes[world], kw)
+            worlds = [[*sizes[world], kw["world_seed"] + world, limit]]
+            weight = 2 * (limit + kw["overhead_seconds"])
         return _trial(
             {**kw, "env": t["env"]},
             {"stage": name, "key": t["key"]},
-            cheap + costly if audit else cheap,
+            weight,
             mode="identity",
             knockout=encode_sites(knockout | _positions(units, out)),
-            divergence=first,
-            worlds=worlds if audit else [],
+            divergence=[] if worlds else first,
+            worlds=worlds,
         )
 
     def inward(key: typing.Any) -> dict | None:
@@ -320,6 +335,7 @@ def _identity(
         "search_seed": dispatch["meta_seed"],
         **IDENTITY,
         **kw["identity"],
+        "audit_replicates": tiers,
         "n_sites": n,
         "cmd": kw["cmd"],
         "env": kw["env"],
@@ -374,7 +390,9 @@ def _fitness(
     """Search, by the `staged` policy, for the units whose knockout costs
     no more than the margin of fitness: a screen for lethal knockouts on
     one world of the screen's size, scores at the small size, and
-    confirmations again at the full size, which pace themselves."""
+    confirmations again at the full size, which pace themselves. If the
+    search is `two_sided`, the screen also fails a knockout whose share
+    is as far over the controls' as a lethal one's is under."""
     units, labels = units_of(kind, kw["operations"], frozenset(knockout))
     if not units:
         return [], {"added": [], "summary": {"units": 0}}
@@ -393,6 +411,11 @@ def _fitness(
         shares = [float(r["score"]) for r in results]
         threshold = lethal_share(shares, kw["screen_error_rate"])
     everything = encode_sites(range(n))
+    two_sided = {**FITNESS, **kw["fitness"]}.get("two_sided", False)
+    counts = {
+        "small": kw["num_control_trials"],
+        "full": kw["num_full_control_trials"],
+    }
 
     def wrap(t: dict) -> dict | None:
         key, out = t["key"], decode_sites(t["env"]["knockout"])
@@ -411,6 +434,7 @@ def _fitness(
             positions,
             mode="screen",
             screen_pass=threshold,
+            **({"screen_ceiling": 1.0 - threshold} if two_sided else {}),
         )
 
     def outward(key: dict) -> dict:
@@ -422,15 +446,21 @@ def _fitness(
         }
         if control:
             size = "full" if "reconfirm" in key else "small"
-            return {"control": size, "replicate": key["replicate"]}
+            return _control(by_key, size, key["replicate"], counts[size])
         return {"stage": name, "key": key}
 
     def inward(key: typing.Any) -> dict | None:
         if not isinstance(key, dict):
             return None
         if "control" in key:
-            inner = {"retained": everything, "replicate": key["replicate"]}
-            if key["control"] == "full":
+            size, count = key["control"], counts.get(key["control"])
+            if count is None:
+                return None  # the screen's own
+            replicate = key["replicate"] % count
+            if key != _control(by_key, size, replicate, count):
+                return None  # inconclusive: another stands in for it
+            inner = {"retained": everything, "replicate": replicate}
+            if size == "full":
                 inner["reconfirm"] = 1
             return inner
         return key.get("key") if key.get("stage") == name else None
@@ -479,23 +509,67 @@ def _fitness(
     }
 
 
-def _final(kw: dict, name: str, knockout: set, by_key: dict) -> Stage:
+def _reconfirmed(done: dict) -> list[dict]:
+    """List the keys of the full-size competitions already run of the
+    genome as the finished stages leave it: those of the reconfirmation
+    that accepted the last knockout, if a fitness stage made it."""
+    for name, outcome in sorted(done.items(), reverse=True):
+        if not outcome["added"]:
+            continue  # the genome is as the stage before left it
+        search = outcome["summary"].get("search", {})
+        deleted = search.get("n_sites", 0) - search.get("retained_count", 0)
+        counts = [
+            c["reconfirm_replicates"]
+            for c in search.get("confirmations", ())
+            if c["accepted"] and c["deleted"] == deleted
+            if "reconfirm_replicates" in c
+        ]
+        if name.split(":")[1] != "fitness" or not counts:
+            break
+        return [
+            {
+                "stage": name,
+                "key": {
+                    "retained": search["retained"],
+                    "replicate": r,
+                    "reconfirm": 1,
+                },
+            }
+            for r in range(counts[-1])
+        ]
+    return []
+
+
+def _final(
+    kw: dict, name: str, knockout: set, by_key: dict, done: dict
+) -> Stage:
     """Score the finished skeleton against the wildtype at the full size,
-    beside the wildtype's own full-size controls."""
+    beside the wildtype's own full-size controls.
+
+    A competition is not run twice of one genome: where no stage has
+    changed the genome since a fitness stage reconfirmed it, that
+    reconfirmation's competitions are the first of the skeleton's.
+    """
     results = {}
-    for who, positions, key, count in (
-        ("skeleton", knockout, {"stage": name}, kw["final_replicates"]),
+    count = kw["num_full_control_trials"]
+    again = _reconfirmed(done)[: kw["final_replicates"]]
+    for who, positions, keys in (
+        (
+            "skeleton",
+            knockout,
+            again
+            + [
+                {"stage": name, "replicate": r}
+                for r in range(len(again), kw["final_replicates"])
+            ],
+        ),
         (
             "wildtype",
             set(),
-            {"control": "full"},
-            kw["num_full_control_trials"],
+            [_control(by_key, "full", r, count) for r in range(count)],
         ),
     ):
-        trials = [
-            _competition(kw, {**key, "replicate": r}, "full", positions)
-            for r in range(count)
-        ]
+        trials = [_competition(kw, k, "full", positions) for k in keys]
         results[who] = _await(by_key, trials)
     actions = [a for found, _ in results.values() for a in found]
     if any(scores is None for _, scores in results.values()):
@@ -515,6 +589,7 @@ def _final(kw: dict, name: str, knockout: set, by_key: dict) -> Stage:
                 else None
             ),
         }
+    summary["skeleton"]["reused"] = len(again)
     return actions, {"added": [], "summary": summary}
 
 
@@ -538,7 +613,7 @@ def _stage(
             kw, name, kind, knockout, dispatch, records, by_key, done
         )
     if step == "final" and not kind:
-        return _final(kw, name, knockout, by_key)
+        return _final(kw, name, knockout, by_key, done)
     raise ValueError(f"unknown stage {spec!r}")
 
 
@@ -561,16 +636,21 @@ def churn(
       own: the knockout and the wildtype, each alone in a world, side by
       side until they differ (`divergence`). Its audits, which pace
       themselves, also compete the knockouts so far against the wildtype
-      on fresh worlds (`identity_worlds`), each of which must end
-      bit-identical to the wildtype's own. A failed audit sifts what was
-      knocked out since the last that passed, by halves: what passes
-      stays out, and a unit that fails alone goes back in for good.
-      Nothing is kept that an audit has not accepted.
+      in the worlds of `identity_worlds`, the same in every audit, each
+      of which must end bit-identical to the wildtype's own. A world is
+      a trial: those of the first size are launched at once, with the
+      search's test, and each later size's only if all before it pass.
+      A failed audit sifts what was knocked out since, auditing groups
+      of it at once: what passes stays out, and a unit that fails alone
+      goes back in for good. Nothing is kept that an audit has not
+      accepted.
     * `fitness:<kind>` searches, by the `staged` policy, for the units
       whose knockout costs no more than the margin of fitness. A screen
       is one competition of the `screen` size, and fails a knockout whose
       share of cells is under what a wildtype control would fall below
-      with probability `screen_error_rate` (`lethal_share`). The ranking
+      with probability `screen_error_rate` (`lethal_share`); if the
+      search is `two_sided`, also one whose share is as far over the
+      controls'. The ranking
       and the first
       confirmation run competitions of the `small` size. The longest
       knockout that confirmation has accepted is confirmed again at the
@@ -579,9 +659,13 @@ def churn(
       stages, and each that fails halves it and bounds the search from
       above. The wildtype controls of each size are run once and serve
       every stage.
-    * `final` scores the finished skeleton at the `full` size.
+    * `final` scores the finished skeleton at the `full` size, counting
+      the last reconfirmation's competitions among its own where no
+      stage has changed the genome since.
 
-    `<kind>` names the stage's units, as `units_of` lists them. A finished
+    `<kind>` names the stage's units, as `units_of` lists them. The
+    stages start from the wildtype with the positions of `knockout` out,
+    none by default, as an earlier run's stages left it. A finished
     stage is memoized, so each tick replays only the stage under way.
     rundishtiny ends every competition after a set time (`run_seconds`),
     where it stands, and a run still going `overhead_seconds` later is
@@ -619,7 +703,7 @@ def churn(
     kw = {**DEFAULTS, **dispatch["assay_kwargs"]}
     operations, stages = kw["operations"], list(kw["stages"])
     done = {m["stage"]: m for m in memo}
-    knockout: set = set()
+    knockout: set = set(decode_sites(kw["knockout"]))
     for i, spec in enumerate(stages):
         name = f"{i:02d}:{spec}"
         if name in done:

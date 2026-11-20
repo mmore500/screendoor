@@ -388,6 +388,76 @@ def test_reconfirm_judges_an_accepted_knockout_by_costlier_trials():
         run(reconfirm={"num_control_trials": 30, "every": -1})
 
 
+def test_early_looks_judge_a_knockout_far_from_the_limit_on_few_scores():
+    """Ten sites gain a little each, so their knockout is far over the
+    limit, and a look at an eighth of the first look's scores accepts it."""
+    toy = Toy(30, critical={3}, costs=dict.fromkeys(range(10, 20), -0.03))
+    again = {"num_control_trials": 30}
+    search, late, asked = drive(
+        toy, sd=0.05, max_replicates=256, reconfirm=again
+    )
+    first, refirst = search.first_look, search.refirst_look
+    assert first >= 8 and late["retained"] == {3}
+    assert [c["replicates"] for c in late["confirmations"][:1]] == [first]
+    assert late["confirmations"][-1]["reconfirm_replicates"] == refirst
+    search, early, asked = drive(
+        toy, sd=0.05, max_replicates=256, reconfirm=again, early_looks=3
+    )
+    assert early["retained"] == {3}
+    looks = [math.ceil(first / 2**k) for k in (3, 2, 1, 0)]
+    assert early["confirmations"][0]["replicates"] in looks[:3]
+    assert early["confirmations"][-1]["reconfirm_replicates"] < refirst
+    for stage in ("confirm", "reconfirm"):
+        most = 1 + max(r[3] for r in asked if r[1] == stage)
+        assert (
+            most
+            == early["confirmations"][stage == "reconfirm" and -1][
+                "reconfirm_replicates"
+                if stage == "reconfirm"
+                else "replicates"
+            ]
+        )
+    # a second confirmation can look early where the first does not
+    own = {**again, "early_looks": 3}
+    search, mixed, asked = drive(
+        toy, sd=0.05, max_replicates=256, reconfirm=own
+    )
+    assert mixed["confirmations"][0]["replicates"] == first
+    assert mixed["confirmations"][-1]["reconfirm_replicates"] < refirst
+
+
+def test_two_sided_counts_a_gain_as_a_loss():
+    """Sites 10 to 19 each gain half the margin: one-sided, all are
+    deleted with the harmless ones; two-sided, only as many as leave the
+    score within the margin of the controls' mean."""
+    gains = dict.fromkeys(range(10, 20), -0.03)
+    toy = Toy(30, critical={3}, sets=[{5, 6}], costs=gains)
+    search, one, _ = drive(toy)
+    assert one["retained"] == {3, 5}
+    search, two, _ = drive(toy, two_sided=True)
+    deleted = frozenset(range(30)) - two["retained"]
+    assert {3, 5} <= two["retained"] and len(deleted & set(gains)) <= 2
+    assert deleted >= frozenset(range(30)) - {3, 5} - set(gains)
+    # the ranking sorts by the size of an effect, so the gains come last
+    order = two["ranking"]
+    assert set(order[-10:]) == set(gains)
+    # a confirmation rejects scores as far over the controls' mean as
+    # it would under it
+    test, alpha = search.sequential, search.sequential.alpha(0)
+    over = [test.mean + 0.2] * 50
+    under = [test.mean - 0.2] * 50
+    level = [test.mean] * 50
+    assert search.judge(test, over, alpha) == "reject"
+    assert search.judge(test, under, alpha) == "reject"
+    assert search.judge(test, level, alpha) == "accept"
+    one_sided = StagedSearch(
+        30, {"abs_tol": 0.06}, seed=1, num_control_trials=2
+    )
+    assert one_sided.judge(test, over, alpha) == "accept"
+    # the jackknife fails a knockout that gains too much, as one that loses
+    assert search.cost(-0.1) == 0.1 and one_sided.cost(-0.1) == -0.1
+
+
 @pytest.mark.parametrize(
     "kw",
     [
@@ -396,6 +466,8 @@ def test_reconfirm_judges_an_accepted_knockout_by_costlier_trials():
         {"batch_size": 0},
         {"max_set_size": 0},
         {"jackknife_replicates": 0},
+        {"early_looks": -1},
+        {"reconfirm": {"num_control_trials": 2, "early_looks": -1}},
     ],
 )
 def test_staged_search_refuses_bad_kwargs(kw):

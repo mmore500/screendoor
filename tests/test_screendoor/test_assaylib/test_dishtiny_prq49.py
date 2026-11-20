@@ -85,16 +85,17 @@ def fake_trial(t, strip_fails=False):
             )
         }
     if mode == "identity":
-        # the search's test is the side-by-side one alone; an audit's is
-        # also by competition, on worlds of its own
-        assert [d[:2] for d in json.loads(env["DISHTINY_DIVERGENCE"])] == [
-            [2048, 100],
-            [8192, 100],
-        ]
-        audit = "fresh" in t["key"]["key"]
-        assert bool(worlds) == audit
-        same = {"dead", "silent"} if audit else {"dead", "silent", "sly"}
-        return {"accept": set(effects) <= same}
+        # the search's test is the side-by-side one alone; an audit is
+        # that and a trial for each of its worlds, and the sly
+        # instruction shows in the third of them only
+        tiers = json.loads(env["DISHTINY_DIVERGENCE"])
+        same = set(effects) <= {"dead", "silent", "sly"}
+        if not worlds:
+            assert [d[:2] for d in tiers] == [[2048, 100], [8192, 100]]
+            return {"accept": same}
+        ((_, _, seed, _),) = worlds
+        assert "fresh" in t["key"]["key"] and tiers == []
+        return {"accept": same and not (effects["sly"] and seed == 2)}
     size = (env["DISHTINY_UPDATES"], env["DISHTINY_N_CELLS"])
     rng = random.Random(json.dumps(t["key"], sort_keys=True))
     if mode == "screen" or size == ("8192", "576"):
@@ -235,8 +236,20 @@ def test_e2e_skeleton():
     final = stages["final"]["summary"]
     assert final["skeleton"]["n"] == 8 and final["wildtype"]["n"] == 20
     assert final["skeleton"]["mean"] == pytest.approx(0.5, abs=0.03)
-    # each size's controls ran once, for every stage
     keys = [t["key"] for t in r["trials"]]
+    # the last strip took nothing, so the competitions that reconfirmed
+    # the last knockout are the first of the final check's, not run again
+    assert s["stages"][16]["added"] == 0
+    reconfirmed = [
+        c["reconfirm_replicates"]
+        for c in stages["fitness:all"]["summary"]["search"]["confirmations"]
+        if c["accepted"] and "reconfirm_replicates" in c
+    ][-1]
+    assert final["skeleton"]["reused"] == min(reconfirmed, 8) > 0
+    own = [k for k in keys if k.get("stage") == "17:final"]
+    assert len(own) == 8 - final["skeleton"]["reused"]
+    assert len(keys) == len({json.dumps(k, sort_keys=True) for k in keys})
+    # each size's controls ran once, for every stage
     for size, n in (("small", 40), ("screen", 20), ("full", 20)):
         controls = [k for k in keys if k.get("control") == size]
         assert sorted(k["replicate"] for k in controls) == list(range(n))
@@ -254,6 +267,7 @@ def test_e2e_skeleton():
     assert threshold == e2e_skeleton.lethal_share(shares, 0.001)
     assert 0.1 < threshold < min(shares)
     # a trial's weight is the seconds its competitions may take
+    audits = collections.defaultdict(dict)  # each audit's trials' verdicts
     for t in r["trials"]:
         env, weight = t["request"]["env"], t["request"]["weight"]
         mode, cells = env["DISHTINY_MODE"], env.get("DISHTINY_N_CELLS")
@@ -272,19 +286,137 @@ def test_e2e_skeleton():
         else:
             assert mode == "identity"
             first = json.loads(env["DISHTINY_DIVERGENCE"])
-            assert first == [[2048, 100, 56], [8192, 100, 222]]
             worlds = json.loads(env["DISHTINY_WORLDS"])
-            if "fresh" not in t["key"]["key"]:
-                assert worlds == [] and weight == 56 + 222
+            key = t["key"]["key"]
+            verdict = t["result"]["accept"]
+            if not worlds:  # the search's test, which an audit runs too
+                assert first == [[2048, 100, 56], [8192, 100, 222]]
+                assert weight == 56 + 222 and key["replicate"] == 0
+                if "fresh" in key:
+                    audits[t["key"]["stage"], key["retained"]][-1] = verdict
                 continue
-            assert [w[:2] for w in worlds[::5]] == [[12288, 36], [24576, 64]]
-            assert [w[3] for w in worlds] == [60, 60, 60, 60, 213, 213]
-            # each world's competition, and the wildtype's own
-            assert weight == 56 + 222 + 2 * sum(w[3] + 10 for w in worlds)
+            # an audit's other trials are a world each, of its
+            # competition and the wildtype's own: the same sixteen worlds
+            # in every audit
+            index = key["replicate"] - 1
+            size = [12288, 36, 60] if index < 8 else [24576, 400, 1333]
+            assert key["fresh"] == 1 and first == []
+            assert worlds == [[*size[:2], index, size[2]]]
+            assert weight == 2 * (size[2] + 10)
+            audits[t["key"]["stage"], key["retained"]][index] = verdict
+    # an audit's small worlds are launched with the search's test, and
+    # its larger ones only if all of those pass
+    assert len({stage for stage, _ in audits}) > 1
+    for audit in audits.values():
+        first = [audit[i] for i in range(-1, 8)]
+        rest = sorted(i for i in audit if i >= 8)
+        assert rest == (list(range(8, 16)) if all(first) else [])
+    assert {all(audit.values()) for audit in audits.values()} == {True, False}
     # a control is the wildtype, whatever the stage has knocked out
     for t in r["trials"]:
         if "control" in t["key"]:
             assert t["request"]["env"]["DISHTINY_KNOCKOUT"] == ""
+
+
+def test_e2e_skeleton_final_reuses_no_trial_of_another_genome():
+    # the strip after the fitness stage takes what its knockout left
+    # dead, so the reconfirmation was of another genome than the final's
+    r = simulate_dispatch(
+        "scd.assaylib.dishtiny_prq49.e2e_skeleton",
+        {**KW, "stages": ["fitness:outputs", "strip", "final"]},
+        fake_trial=fake_trial,
+        meta_seed=1,
+    )
+    assert r["completed"]["outcome"] == "succeeded", r["completed"]
+    stages = r["completed"]["summary"]["stages"]
+    assert stages[0]["added"] and stages[1]["added"]
+    assert stages[2]["summary"]["skeleton"] == {
+        **stages[2]["summary"]["skeleton"],
+        "n": 8,
+        "reused": 0,
+    }
+    own = [t for t in r["trials"] if t["key"].get("stage") == "02:final"]
+    assert len(own) == 8
+
+
+def test_e2e_skeleton_starts_from_a_knockout_and_can_judge_two_sided():
+    # the fitness stages alone, from the genome identity leaves, end at
+    # the skeleton the whole procedure does
+    start = "3,5-7,18"
+    seen = collections.Counter()
+
+    def fake(t):
+        env = t["env"]
+        if env["DISHTINY_MODE"] == "screen":
+            least = float(env["DISHTINY_SCREEN_PASS"])
+            seen["DISHTINY_SCREEN_CEILING" in env] += 1
+            assert float(env.get("DISHTINY_SCREEN_CEILING", 1 - least)) == (
+                pytest.approx(1 - least)
+            )
+        out = decode_sites(env["DISHTINY_KNOCKOUT"])
+        # every genome but the wildtype's own builds on the start
+        assert not out or decode_sites(start) <= out
+        return fake_trial(t)
+
+    for fitness in ({}, {"two_sided": True, "early_looks": 2}):
+        seen.clear()
+        r = simulate_dispatch(
+            "scd.assaylib.dishtiny_prq49.e2e_skeleton",
+            {
+                **KW,
+                "knockout": start,
+                "stages": e2e_skeleton.STAGES[9:],
+                "fitness": fitness,
+            },
+            fake_trial=fake,
+            meta_seed=1,
+        )
+        assert r["completed"]["outcome"] == "succeeded", r["completed"]
+        s = r["completed"]["summary"]
+        assert decode_sites(s["skeleton"]) == SKELETON
+        assert s["knockout_count"] == 13
+        # two-sided, a screen also fails a share as far over the controls'
+        assert set(seen) == {bool(fitness)}
+        for t in r["trials"]:
+            if "control" in t["key"]:
+                assert t["request"]["env"]["DISHTINY_KNOCKOUT"] == ""
+
+
+def test_e2e_skeleton_runs_an_inconclusive_control_again():
+    unsure = [
+        {"control": "small", "replicate": 3},
+        {"control": "full", "replicate": 5},
+        {"control": "full", "replicate": 25},  # the one run in its place
+    ]
+
+    def fake(t):
+        result = fake_trial(t)
+        if t["key"] in unsure:
+            return {**result, "viable": False, "inconclusive": "killed"}
+        return result
+
+    r = simulate_dispatch(
+        "scd.assaylib.dishtiny_prq49.e2e_skeleton",
+        KW,
+        fake_trial=fake,
+        meta_seed=1,
+    )
+    assert r["completed"]["outcome"] == "succeeded", r["completed"]
+    s = r["completed"]["summary"]
+    assert decode_sites(s["skeleton"]) == SKELETON
+    # each is run again, 40 small or 20 full replicates on, and no more
+    controls = collections.defaultdict(set)
+    for t in r["trials"]:
+        if "control" in t["key"]:
+            controls[t["key"]["control"]].add(t["key"]["replicate"])
+    assert controls["small"] == {*range(40), 43}
+    assert controls["full"] == {*range(20), 25, 45}
+    assert controls["screen"] == set(range(20))
+    assert s["stages"][-1]["summary"]["wildtype"] == {
+        **s["stages"][-1]["summary"]["wildtype"],
+        "n": 20,
+        "failed": 0,
+    }
 
 
 def test_e2e_skeleton_skips_a_strip_whose_trial_fails():
@@ -530,6 +662,13 @@ def test_run_trial_modes(dishtiny, monkeypatch):
     assert passed["accept"] and passed["score"] > 0.1
     monkeypatch.setenv("DISHTINY_SCREEN_PASS", str(passed["score"]))
     assert not run_trial.run("screen", {3}, None)["accept"]
+    # and, with a ceiling, at or over that share
+    monkeypatch.setenv("DISHTINY_SCREEN_PASS", "0.1")
+    monkeypatch.setenv("DISHTINY_SCREEN_CEILING", str(passed["score"]))
+    assert not run_trial.run("screen", {3}, None)["accept"]
+    monkeypatch.setenv("DISHTINY_SCREEN_CEILING", "1.0")
+    assert run_trial.run("screen", {3}, None)["accept"]
+    monkeypatch.delenv("DISHTINY_SCREEN_CEILING")
     for least in ("0.1", "0.0", "-0.2"):  # extinct fails any threshold
         monkeypatch.setenv("DISHTINY_SCREEN_PASS", least)
         failed = run_trial.run("screen", {1, 2}, None)

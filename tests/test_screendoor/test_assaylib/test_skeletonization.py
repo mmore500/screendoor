@@ -429,6 +429,9 @@ from screendoor.assaylib.skeletonization._knockout._controls import (  # noqa: E
     t_cdf,
     t_quantile,
 )
+from screendoor.assaylib.skeletonization._knockout._group_size import (  # noqa: E402
+    group_size,
+)
 
 
 def control_judge(kw, controls, replicates):
@@ -481,14 +484,15 @@ def test_adaptive_audits_pace_themselves_and_sift_failures(policy, sly):
     commits = [x for x in s["transitions"] if x["kind"] == "deletion"]
     assert len(s["transitions"]) - len(commits) == s["rollbacks"]
     if not sly:
-        # nothing fails: the audits thin out as the commits go by
+        # nothing fails: the audits thin out as the commits go by. Each
+        # is one trial, and the first genotype's makes one more
         assert not rejected and s["rollbacks"] == 0
-        assert len(audits) <= 2 + math.log2(max(len(commits), 1))
+        assert len(audits) <= 3 + math.log2(max(len(commits), 1))
     else:
-        # a failed audit finds its sly sites by halves, and they are not
+        # a failed audit finds its sly sites by groups, and they are not
         # deleted again: a bisection's worth of audits a site
         assert 1 <= s["rollbacks"] <= len(sly)
-        assert len(audits) <= 2 * math.log2(36) * len(sly) + 8
+        assert len(audits) <= 4 * math.log2(36) * len(sly) + 16
         # no search trial deletes a sly site after an audit put it back
         seen = set()
         for t in r["trials"]:  # in the order submitted
@@ -497,10 +501,161 @@ def test_adaptive_audits_pace_themselves_and_sift_failures(policy, sly):
                 seen |= {i for i in sly if out == {i}}
             else:
                 assert not out & seen
-    # the last trial of all is the audit that accepts the skeleton
-    last = max(audits, key=lambda t: t["key"]["fresh"])
-    assert last["result"]["accept"]
-    assert decode_sites(last["key"]["retained"]) == essential | sly
+    # every audit is in the same conditions, none is run twice, and one
+    # accepted the skeleton
+    assert {t["key"]["fresh"] for t in audits} == {1}
+    keys = [t["key"]["retained"] for t in audits]
+    assert len(keys) == len(set(keys))
+    (final,) = [
+        t
+        for t in audits
+        if decode_sites(t["key"]["retained"]) == essential | sly
+    ]
+    assert final["result"]["accept"]
+
+
+def test_audit_replicates_come_a_tier_at_a_time():
+    """An audit's genotype takes two trials, then three more only if both
+    pass. A loud site fails every audit trial, and a sly one only the
+    fourth: both go back in."""
+    essential, loud, sly = {2, 17}, {9}, {21}
+
+    def fake(t):
+        out = frozenset(range(24)) - decode_sites(t["env"]["retained"])
+        shows = set(essential)
+        if "fresh" in t["key"]:
+            shows |= loud | (sly if t["env"]["replicate"] == "3" else set())
+        return {"accept": not out & shows}
+
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.hybrid.make_churn("
+        "num_control_trials=1)",
+        {
+            "n_sites": 24,
+            "cmd": "x",
+            "search_seed": 3,
+            "audit_every": 2,
+            "audit_adaptive": True,
+            "audit_replicates": [2, 3],
+            "max_rollbacks": 100,
+        },
+        fake_trial=fake,
+    )
+    s = r["completed"]["summary"]
+    assert decode_sites(s["retained"]) == essential | loud | sly
+    audits = {}
+    for t in r["trials"]:
+        if "fresh" in t["key"]:
+            audit = audits.setdefault(t["key"]["retained"], {})
+            audit[t["key"]["replicate"]] = t["result"]["accept"]
+        else:
+            assert t["key"]["replicate"] == 0
+    for audit in audits.values():
+        first = audit[0] and audit[1]
+        assert sorted(audit) == ([0, 1, 2, 3, 4] if first else [0, 1])
+    assert len({len(audit) for audit in audits.values()}) == 2
+
+
+def _sift(n, shows, batch_size=56):
+    """Sift a knockout of all `n` sites, where an audit rejects a genotype
+    if `shows(deleted)`, given the sites it deletes. Returns the search
+    and each wave's sites deleted."""
+    search = skeletonization.hybrid._churn.HybridSearch(
+        range(n), batch_size=batch_size, seed=0
+    )
+    full = frozenset(range(n))
+    sift, waves, verdicts, asked = search.sift(frozenset()), [], None, set()
+    while True:
+        try:
+            wave = sift.send(verdicts)
+        except StopIteration:
+            return search, waves
+        genotypes = wave["genotypes"]
+        # every audit is in the same conditions, and none is asked twice
+        assert wave["fresh"] == 1
+        assert 0 < len(genotypes) <= batch_size
+        assert asked.isdisjoint(genotypes)
+        asked.update(genotypes)
+        verdicts = {
+            g: "reject" if shows(full - g) else "accept" for g in genotypes
+        }
+        waves.append([full - g for g in genotypes])
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 7, 40, 94])
+@pytest.mark.parametrize("rate", [0.0, 0.05, 0.3, 0.7, 1.0])
+def test_sift_keeps_the_sites_that_fail(n, rate):
+    rng = random.Random(n + int(100 * rate))
+    bad = {i for i in range(n) if rng.random() < rate}
+    search, waves = _sift(n, lambda out: out & bad)
+    found = set(range(n)) - bad
+    assert search.trusted[-1] == bad == search.excluded
+    assert not search.stopped
+    # the first round is the audit of it all, and of the first genotype
+    assert waves[0] == [set(), set(range(n))]
+    if not bad:
+        assert len(waves) == 1  # it passed, and its verdict stands
+    # the genotype found was audited, with it all deleted together
+    assert found in [out for wave in waves for out in wave]
+
+
+def test_sift_first_cut_doubles_its_groups():
+    _, waves = _sift(94, lambda out: 5 in out)
+    cut = [len(out) for out in waves[1]]
+    assert cut == [1, 1, 2, 2, 4, 4, 8, 8, 16, 16, 32]
+    assert set().union(*waves[1]) == set(range(94))
+
+
+def test_sift_audits_sites_alone_where_most_fail():
+    """Where most sites fail, the round after the first cut audits each
+    site left alone, at once: not a bisection's worth of audits a site,
+    one after another."""
+    rng = random.Random(1)
+    bad = {i for i in range(94) if rng.random() < 0.7}
+    _, waves = _sift(94, lambda out: out & bad)
+    together, *others = waves[2]  # what the first cut accepted, at once
+    third = [out - together for out in others]
+    assert len(third) > 14 and {len(out) for out in third} == {1}
+    assert len(waves) <= 8 and sum(map(len, waves)) < 94 + 30
+    # a wave holds `batch_size` audits at most
+    _, waves = _sift(94, lambda out: out & bad, batch_size=14)
+    assert max(map(len, waves)) == 14
+
+
+def test_sift_keeps_one_of_two_sites_that_fail_only_together():
+    """Sites 3 and 60 fail only together. The first cut has them in two
+    groups, which both pass; deleted together they are the knockout
+    that failed, and the runs then taken find site 60, with which the
+    failure starts."""
+    search, waves = _sift(64, lambda out: {3, 60} <= out)
+    assert search.trusted[-1] == {60} == search.excluded
+    assert all(not {3, 60} <= out for out in waves[1])
+    # runs of the sites, from the first on
+    assert all(out == set(range(len(out))) for out in waves[2])
+    assert set(range(64)) - {60} in [out for wave in waves for out in wave]
+    assert len(waves) <= 6
+
+
+def test_sift_stops_where_the_first_genotype_fails_its_own_audit():
+    search, waves = _sift(8, lambda out: True)
+    assert search.stopped == "control_rejected"
+    assert search.trusted == [frozenset(range(8))] and not search.excluded
+    assert waves == [[set(), set(range(8))]]
+
+
+@pytest.mark.parametrize(
+    "outcomes,size",
+    [
+        ([(1, False)] * 9 + [(1, True)], 1),
+        ([(1, True)] * 6 + [(1, False)] * 4, 1),
+        ([(1, True), (1, True), (2, True), (2, True), (4, False)], 4),
+        ([(8, True)] * 6 + [(8, False)] * 4, 8),
+        ([(1, True)] * 99 + [(1, False)], 64),
+        ([(16, False)], 1),
+    ],
+)
+def test_group_size_passes_half_the_time(outcomes, size):
+    assert group_size(outcomes) == size
 
 
 def test_beta_quantile_matches_known_values():

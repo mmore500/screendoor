@@ -4,7 +4,7 @@ import typing
 
 from .._knockout._SequentialTest import SequentialTest
 from .._knockout._controls import Controls
-from .._knockout._masks import ACCEPT
+from .._knockout._masks import ACCEPT, REJECT
 from ._fit_effects import fit_effects
 
 Wave = typing.Generator[list, list, typing.Any]
@@ -46,6 +46,12 @@ class StagedSearch:
        of a costlier trial against controls of its own; that test comes
        after every `every` acceptances, and at the end.
 
+    With `two_sided`, a gain counts as a loss does: the jackknife fails a
+    knockout whose mean score is too far from the controls' either way,
+    the ranking sorts the pool by the size of each site's effect, and a
+    confirmation accepts only a knockout shown to be within the margin of
+    the controls' mean above and below.
+
     Parameters
     ----------
     n_sites : int
@@ -80,6 +86,12 @@ class StagedSearch:
             if self.reconfirm is None
             else int(self.reconfirm.get("every", 1))
         )
+        self.two_sided = bool(kw.get("two_sided", False))
+        # looks a confirmation takes before its first, and a second one's
+        self.early_looks = int(kw.get("early_looks", 0))
+        self.reearly_looks = int(
+            (self.reconfirm or {}).get("early_looks", self.early_looks)
+        )
         self.max_ranking_trials = int(kw.get("max_ranking_trials", 3200))
         self.site_value = float(kw.get("site_value", 400))
         if min(self.n_screens, self.batch_size, self.max_set_size) < 1:
@@ -90,6 +102,8 @@ class StagedSearch:
             raise ValueError("jackknife_replicates must be positive")
         if self.reconfirm_every < 0:
             raise ValueError("reconfirm's every must not be negative")
+        if min(self.early_looks, self.reearly_looks) < 0:
+            raise ValueError("early_looks must not be negative")
         self.sites = list(range(n_sites))
         self.kw = kw
         self.seed = seed
@@ -284,9 +298,9 @@ class StagedSearch:
             ]
             for j, deleted in enumerate(new):
                 mine = scores[j * reps : (j + 1) * reps]
-                self.scored[deleted] = (
-                    None in mine
-                    or self.controls.mean - sum(mine) / reps > self.usable
+                self.scored[deleted] = None in mine or (
+                    self.cost(self.controls.mean - sum(mine) / reps)
+                    > self.usable
                 )
         return [self.scored[deleted] for deleted in knockouts]
 
@@ -358,6 +372,11 @@ class StagedSearch:
             found = yield from self.shrink(deleted, tier)
             if found is None or not (yield from self.jackknife(found, tier)):
                 return
+
+    def cost(self, loss: float) -> float:
+        """Give what a loss of score counts for: itself or, if
+        `two_sided`, its size, a gain counting as a loss does."""
+        return abs(loss) if self.two_sided else loss
 
     def draw(self, pool: list[int], dose: float) -> frozenset[int]:
         """Draw a random knockout of `pool`, each site out with chance
@@ -548,7 +567,9 @@ class StagedSearch:
         trials double from 100 until `max_ranking_trials`, or until, with
         four trials a site or more, the remaining sites' cost is within
         half of `usable` or another deleted site would cost over
-        `site_value` trials.
+        `site_value` trials. If `two_sided`, a site's cost is the size of
+        its effect, less a standard error, and the pool is sorted by that
+        size; the sites' effects still add up with their signs.
 
         Returns
         -------
@@ -579,8 +600,19 @@ class StagedSearch:
             effects, error = fit_effects(knockouts, losses, pool)
             # a site that clearly costs more than can be accepted will
             # not be deleted: leave it in from here on
-            live = [i for i in live if effects[i] - 2.0 * error <= usable]
-            load = sum(effects[i] for i in live)
+            live = [
+                i
+                for i in live
+                if self.cost(effects[i]) - 2.0 * error <= usable
+            ]
+            load = sum(
+                (
+                    max(0.0, abs(effects[i]) - error)
+                    if self.two_sided
+                    else effects[i]
+                )
+                for i in live
+            )
             dose = min(0.5, max(0.1, usable / load)) if load > 0 else 0.5
             target = min(2 * asked, self.max_ranking_trials)
             if asked < 4 * len(pool) or math.isinf(error) or not live:
@@ -606,21 +638,38 @@ class StagedSearch:
             if gain * self.site_value < asked:
                 break
         self.stats["ranking_trials"] = asked
-        order = sorted(pool, key=lambda i: (effects[i], i))
+        order = sorted(pool, key=lambda i: (self.cost(effects[i]), i))
         total, cutoff = 0.0, 0
         for site in order:  # less a standard error: noise is not a cost
-            total += max(0.0, effects[site] - error)
-            if total > usable:
+            sure = max(0.0, self.cost(effects[site]) - error)
+            total += math.copysign(sure, effects[site])
+            if self.cost(total) > usable:
                 break
             cutoff += 1
         return order, effects, error, cutoff
+
+    def judge(
+        self, test: SequentialTest, scores: list, alpha: float
+    ) -> str | None:
+        """Judge scores by the `sprt` rule and, if `two_sided`, their
+        mirror image about the controls' mean too, where a gain shows as
+        a loss: accepted if both are, and rejected if either is."""
+        verdicts = {test.judge(scores, "sprt", alpha)}
+        if self.two_sided:
+            mirror = [2.0 * test.mean - score for score in scores]
+            verdicts.add(test.judge(mirror, "sprt", alpha))
+        if REJECT in verdicts:
+            return REJECT
+        return ACCEPT if verdicts == {ACCEPT} else None
 
     def stream(self, deleted: frozenset[int], stage: str = "confirm") -> Wave:
         """Judge a knockout's `stage` scores by the `sprt` rule, look by
         look, from the first look's scores and doubling up to
         `max_replicates`: its `confirm` scores against the controls, or
         its `reconfirm` scores, of the costlier trial, against that
-        trial's own.
+        trial's own. With `early_looks`, as many looks come before the
+        first, each of half the scores of the next, so that a knockout
+        far from the limit is judged on few.
 
         Returns
         -------
@@ -632,14 +681,18 @@ class StagedSearch:
         test = self.resequential if again else self.sequential
         first = self.refirst_look if again else self.first_look
         alpha = test.alpha(len(self.confirmations))
-        total, verdict = min(first, test.max_replicates), None
+        look, verdict = (
+            -(self.reearly_looks if again else self.early_looks),
+            None,
+        )
         while True:
+            total = min(math.ceil(first * 2.0**look), test.max_replicates)
             scores = yield [("score", stage, deleted, r) for r in range(total)]
             if None not in scores:
-                verdict = test.judge(scores, "sprt", alpha)
+                verdict = self.judge(test, scores, alpha)
             if None in scores or verdict or total >= test.max_replicates:
                 break
-            total = min(2 * total, test.max_replicates)
+            look += 1
         counted = "reconfirm_replicates" if again else "replicates"
         self.confirmations.append(
             {
