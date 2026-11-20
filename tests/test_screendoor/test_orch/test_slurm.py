@@ -133,6 +133,16 @@ def test_array_submission_and_rendering(dispatchdir, clock, slurm):
     assert indices == [0, 0, 1, 1, 2]  # batches of 2, 2 and 1
 
 
+def test_weights_fill_array_tasks(dispatchdir, clock, slurm):
+    _submit(dispatchdir, assay_kwargs={"n": 5, "weights": [2, 1, 1, 2, 2]})
+    run_tick_once(dispatchdir)
+    assert "#SBATCH --array=0-3" in slurm.scripts[1000]
+    (ctx,) = load_dispatches(dispatchdir)
+    trials = sorted(ctx.read_trials(), key=lambda t: t["key"]["i"])
+    assert [t["job"]["index"] for t in trials] == [0, 1, 1, 2, 3]
+    assert [t["request"]["weight"] for t in trials] == [2, 1, 1, 2, 2]
+
+
 def test_one_squeue_per_tick_and_relaunch(dispatchdir, clock, slurm):
     _submit(dispatchdir)
     run_tick_once(dispatchdir)

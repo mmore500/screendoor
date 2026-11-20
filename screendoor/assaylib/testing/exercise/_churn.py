@@ -12,8 +12,9 @@ def churn(
     trial_payloads: list[dict],
     memo: list[dict],
 ) -> list[dict]:
-    """Launch `n` (default 1) copies of `cmd`, each with `$i` and `env`,
-    and succeed with what they sent.
+    """Launch `n` (default 1) copies of `cmd`, each with `$i` and `env`
+    and, with `weights`, its own batch weight, and succeed with what they
+    sent.
 
     Churn raises if any trial has no result.
 
@@ -44,6 +45,11 @@ def churn(
                         "key": {"i": i},
                         "cmd": kw.get("cmd", DEFAULT_CMD),
                         "env": {**kw.get("env", {}), "i": str(i)},
+                        **(
+                            {"weight": kw["weights"][i]}
+                            if "weights" in kw
+                            else {}
+                        ),
                     }
                     for i in range(n)
                 ]

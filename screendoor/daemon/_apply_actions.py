@@ -172,7 +172,9 @@ def apply_actions(
                 "attempt": 0,
                 "task_id": task_id,
                 "key": t["key"],
-                "request": {"cmd": t["cmd"], "env": t["env"]},
+                "request": {
+                    k: t[k] for k in ("cmd", "env", "weight") if k in t
+                },
                 "churn_step": step,
             }
             for task_id, (uid, t) in enumerate(requests.items(), len(trials))

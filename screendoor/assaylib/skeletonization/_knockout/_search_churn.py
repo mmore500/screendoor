@@ -16,6 +16,7 @@ SEARCH_KWARGS = (
     "exact",
     "final_audit",
     "audit_every",
+    "audit_adaptive",
     "max_rollbacks",
     "max_proposal_batches",
     "initial_knockout_size",
@@ -281,7 +282,10 @@ def search_churn(
     `noninferiority` (accept only a loss shown to be within the margin). If
     either is `noninferiority`, a genotype's verdict comes in two stages:
     its replicate 0 screens it, rejecting a detectable loss, and replicates
-    1 to `replicates` then confirm it by its phase's rule.
+    1 to `replicates` then confirm it by its phase's rule. Otherwise an
+    audit's genotype (a wave's `fresh`) takes `audit_replicates` trials;
+    if that is a list, each number is a tier of trials launched at once,
+    and a tier is launched only if the tiers before it pass.
 
     A phase's rule may instead be sequential, `sprt` or `mixture` (see
     `SequentialTest`). Its genotypes are judged look by look: the first
@@ -314,7 +318,9 @@ def search_churn(
     kw = dispatch["assay_kwargs"]
     n = len(kw["sequence"]) if "sequence" in kw else int(kw["n_sites"])
     reps = int(kw.get("replicates", 1))
-    if reps < 1:
+    tiers = kw.get("audit_replicates", reps)
+    tiers = [tiers] if isinstance(tiers, int) else list(tiers)
+    if reps < 1 or not tiers or min(tiers) < 1:
         raise ValueError("replicates must be positive")
     alpha = float(kw.get("alpha", 0.05))
     rules = {
@@ -503,14 +509,24 @@ def search_churn(
             elif screened:
                 verdict = screen_then_confirm(g, fresh, rule, phase, baseline)
             else:
-                verdict = None
-                results = need(g, fresh, range(reps))
-                if results is not None and baseline is not None:
+                # an audit's trials come a tier at a time, while they pass
+                verdict, results = None, []
+                for count in tiers if fresh else [reps]:
+                    more = need(
+                        g, fresh, range(len(results), len(results) + count)
+                    )
+                    if more is None or baseline is None:
+                        verdict = None
+                        break
+                    results += more
                     verdict = _verdict(
                         kw, results, baseline, judge(baseline, rule, alpha)
                     )
-                    if streamed:  # the other phase's rule is sequential
-                        tally[f"{phase}_{rule}_{verdict}"] += 1
+                    if verdict != ACCEPT:
+                        break
+                if streamed and verdict is not None:
+                    # the other phase's rule is sequential
+                    tally[f"{phase}_{rule}_{verdict}"] += 1
             if verdict is not None:
                 verdicts[g] = verdict
         if missing or waiting:

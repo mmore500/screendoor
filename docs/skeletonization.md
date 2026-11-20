@@ -284,6 +284,8 @@ certificate (checked by `test_matches_2026_11_03_implementation` and
 | `combination_rounds` | 2 | Rounds of union proposals after accepted masks |
 | `final_audit` | true (false with a sequential rule throughout) | Re-test the skeleton afresh before certifying it |
 | `audit_every` | 0 | Also audit after every this many commits (0: never) |
+| `audit_adaptive` | false | Audits pace themselves: one that passes doubles `audit_every`, and one that fails halves it. These audits are all under `$fresh` 1, taken as the same conditions, so a genotype is audited once and its verdict stands. A failed audit sifts what was deleted since the last that passed, in rounds that each audit disjoint groups of it at once: a group that passes stays deleted, a site that fails alone goes back in and is not deleted again, and a larger group that fails is cut up for the next round. The first cut is into groups that double in size (1, 1, 2, 2, 4...), which shows how often sites fail; later cuts are to the size that would pass half the time, or to halves if those are smaller. Groups that each pass may fail together, so what a round accepts is audited deleted together; if that fails, its sites are taken again in order, the longest run that passes staying deleted and the site that ends it going back in. If the search's first genotype fails its audit, the search stops. Nothing rolls back, and the result is the newest audited genotype, with no commit unaudited. For a trial that tests an audit (`$fresh`) more strictly than the search |
+| `audit_replicates` | `replicates` | Trials per genotype in an audit (a trial's `$fresh`), each telling its own by `$replicate`. A list gives tiers, such as `[8, 8]`: a tier's trials are launched at once, and only if the tiers before it pass. Not for a `noninferiority` or sequential rule |
 | `max_rollbacks` | 2 | Failed audits tolerated before giving up |
 | `max_proposal_batches` | none | Stop (uncertified) after this many proposal batches |
 | `initial_knockout_size` | none | Sites per initial ddmin chunk (default: halves) |
@@ -374,7 +376,14 @@ use `replicates` with `accept_fraction` to get the same kind of verdicts.
 `scd.assaylib.skeletonization.staged` is for a genome where a cheap,
 pass/fail *screen* can spot large failures, and only a long, scored trial
 can measure small ones. It assumes **no rescue**: a knockout that fails
-keeps failing with more sites out. It runs in three stages.
+keeps failing with more sites out. After the wildtype controls, it runs
+in two stages, each its own function in the package:
+`find_minimal_critical_sets_bisect` (the screens) finds the minimal
+*critical* sets, those whose knockout fails, and retains enough of each;
+`find_maximal_subcritical_set_sort` (the ranking and the confirmation)
+sorts the rest by cost and deletes the longest prefix whose knockout
+passes, a *subcritical* set. The prefix is maximal along the sort, not
+over every set.
 
 1. **Screens.** Random knockouts are screened at a dose that fails
    about half the time, and each failure is shrunk by bisection, several
@@ -395,7 +404,18 @@ keeps failing with more sites out. It runs in three stages.
 3. **Confirmation.** Sort the pool from least to most costly and find,
    by bisection, the longest prefix whose knockout the
    [`sprt`](#sequential-rules) rule accepts against the wildtype
-   controls. These few tests carry the whole `error_rate`.
+   controls. These few tests carry the whole `error_rate`. With
+   `reconfirm`, a knockout the rule accepts is judged a second time, on
+   the scores of a costlier trial (a larger or longer run, say) against
+   controls scored the same way, and is accepted only if it passes both.
+   The costlier test paces itself: the bisection is by the first
+   confirmation, and the costlier one judges the longest prefix accepted
+   so far after every `every` that the first accepts, and where the
+   bisection ends, so that nothing is deleted that it has not accepted.
+   A prefix it rejects becomes the bisection's upper bound. With `every`
+   0 it judges only where the bisection ends: one costlier test where
+   the two agree. With `adaptive`, each prefix it accepts doubles
+   `every`, and each it rejects halves it.
 
 **Redundant, or adding up?** A screen that detects a loss of some size
 also fails when smaller losses add up to it, so a minimal failing set of
@@ -428,7 +448,9 @@ cheapest), and passes if it sends `true` or `{"accept": true}`: the
 knockout shows no large failure. A long trial gets no `$screen` and sends
 a score, as a number or `{"score": ..., "viable": ...}`. A ranking sample
 that is not viable is skipped and counted in `stats.nonviable`. Screens
-run once each: a screen that misreads is not allowed for.
+run once each: a screen that misreads is not allowed for. A
+reconfirmation's trials and its controls get `$reconfirm`, set to 1, and
+the `env` and `cmd` of `reconfirm`.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -440,17 +462,22 @@ run once each: a screen that misreads is not allowed for.
 | `max_ranking_trials` | 3200 | The most long trials the ranking takes |
 | `site_value` | 400 | Long trials another deleted site is worth, to the ranking |
 | `replicates` | `harmless_replicates` | The first look of each confirmation |
+| `early_looks` | 0 | Looks a confirmation takes before that first one, each of half the scores of the next: with 3, at an eighth, a quarter and a half of it. The rule holds at every score, so they change no verdict: a knockout far from the limit is judged on few scores, at a wave more for one near it |
+| `two_sided` | false | Count a gain as a loss: the jackknife fails a knockout whose mean score is too far from the controls' either way, the ranking sorts by the size of each site's effect, and a confirmation accepts only a knockout shown within the margin of the controls' mean above and below. Effects still add up with their signs, so a gain and a loss can cancel |
 | `rel_tol`, `abs_tol`, `require_atleast` | 0, 0, `[]` | The margin, as above; a result under the wildtype in a `require_atleast` field is not viable |
 | `error_rate`, `indifference`, `futility`, `max_replicates` | | The `sprt` rule's, as above |
 | `planned_tests` | 16 | As above; the confirmation makes about `log2` of the pool |
+| `reconfirm` | none | A second confirmation, by a costlier trial: its `num_control_trials` (2 or more), its own `env` and `cmd` over the dispatch's, how many of the first's acceptances pass between its tests (`every`, default 1; 0 tests only the prefix the first settles on), whether that count doubles after each test that passes and halves after each that fails (`adaptive`, default false), and any of `replicates`, `rel_tol`, `abs_tol`, `error_rate`, `indifference`, `futility` and `max_replicates` to use in place of the first's |
 | `search_seed` | the dispatch's `meta_seed` | Seed of the search's own RNG |
 
 The summary gives the `critical` sites, the `redundant_sets` and the
 sets found `adding_up`, with the screen that found each, the sites `kept`
 and `released`, whether the whole pool passes the first screen
 (`pool_certified`), the `ranking` from least to most costly with its
-`effects` and their standard error, the `predicted_cutoff`, each of the
-`confirmations`, and `stats`. It claims no single-deletion minimality:
+`effects` and their standard error (`effects_error`, null for a pool too
+small to rank), the `predicted_cutoff`, each of the
+`confirmations` (with its `reconfirm_replicates`, if it got that far),
+and `stats`. It claims no single-deletion minimality:
 deleted sites are those the ranking put first, up to the margin.
 
 The search takes many waves, about 50 to 200 on the toys below, as each

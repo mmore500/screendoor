@@ -4,7 +4,8 @@ import typing
 
 from ....auxlib._weighted_subset import weighted_subset
 from ._ProposalMemory import ProposalMemory
-from ._masks import ACCEPT, UNKNOWN, singletons
+from ._group_size import group_size
+from ._masks import ACCEPT, REJECT, UNKNOWN, singletons
 
 
 class KnockoutSearch:
@@ -42,6 +43,17 @@ class KnockoutSearch:
         Whether to re-test the skeleton afresh before certifying it.
     audit_every : int, default 0
         Also audit after every this many commits; 0 never does.
+    audit_adaptive : bool, default False
+        Whether audits pace themselves: each one that passes doubles
+        `audit_every`, and each that fails halves it. A failed audit then
+        sifts what was deleted since the last one that passed, auditing
+        groups of it at once (see `sift`): a group an audit accepts
+        stays deleted, and a site that fails alone goes back in, and is
+        not deleted again. These audits are all under `fresh` 1, taken
+        as the same conditions: a genotype is audited once, and its
+        verdict stands. Nothing rolls back, and the
+        result is the newest genotype audits accept, with no commit
+        unaudited.
     max_rollbacks : int, default 2
         Failed audits tolerated before giving up.
     max_proposal_batches : int or None, default None
@@ -72,6 +84,7 @@ class KnockoutSearch:
         exact: bool = True,
         final_audit: bool = True,
         audit_every: int = 0,
+        audit_adaptive: bool = False,
         max_rollbacks: int = 2,
         max_proposal_batches: int | None = None,
         initial_knockout_size: int | None = None,
@@ -89,6 +102,10 @@ class KnockoutSearch:
         self.exact = exact
         self.final_audit = final_audit
         self.audit_every = audit_every
+        self.audit_adaptive = audit_adaptive
+        # the genotypes audits accept, each within the one before
+        self.trusted = [self.current]
+        self.excluded: set = set()  # sites that audits put back in
         self.max_rollbacks = max_rollbacks
         self.max_proposal_batches = max_proposal_batches
         self.initial_knockout_size = initial_knockout_size
@@ -97,6 +114,7 @@ class KnockoutSearch:
         )
         self.cache: dict = {}  # genotype -> verdict
         self.fresh_count = 0
+        self.audits: dict = {}  # genotype -> its audit's verdict, if adaptive
         self.transitions: list = []  # (before, after, kind, reason)
         self.checkpoints = [self.current]
         self.batches = 0
@@ -140,6 +158,8 @@ class KnockoutSearch:
         candidates = list(dict.fromkeys(candidates))
         result, pending = {}, []
         for s in candidates:
+            if not fresh and not self.excluded <= s:
+                self.cache[s] = REJECT  # it deletes what an audit put back
             if s in self.cache and not fresh:
                 result[s] = self.cache[s]
             else:
@@ -371,9 +391,140 @@ class KnockoutSearch:
         self.checkpoints.append(self.current)
         self.commits_since_audit += 1
 
+    def audited(
+        self, genotypes: typing.Iterable[frozenset[int]]
+    ) -> typing.Generator[dict, dict, dict]:
+        """Audit `genotypes`, but for those audited already: every such
+        audit is under `fresh` 1, the same conditions, so one of a
+        genotype is its verdict for good.
+
+        Parameters
+        ----------
+        genotypes : iterable of frozenset of int
+            The genotypes to audit.
+
+        Returns
+        -------
+        Generator[dict, dict, dict]
+            Yields waves and is sent their verdicts; returns `{genotype:
+            verdict}`.
+        """
+        genotypes = list(dict.fromkeys(genotypes))
+        todo = [g for g in genotypes if g not in self.audits]
+        for start in range(0, len(todo), self.b):
+            self.audits.update(
+                (
+                    yield {
+                        "genotypes": todo[start : start + self.b],
+                        "fresh": 1,
+                        "sweep": self.sweeping,
+                    }
+                )
+            )
+        return {g: self.audits[g] for g in genotypes}
+
+    def sift(
+        self, target: frozenset[int]
+    ) -> typing.Generator[dict, dict, None]:
+        """Audit `target`, and where it fails, find as much of what it
+        deletes as audits accept, leaving `trusted` to end with the
+        genotype found.
+
+        Each round audits disjoint groups of the sites at once, each
+        deleted alone from the newest trusted genotype. A group that
+        passes is deleted, a site that fails alone is excluded, and a
+        larger group that fails is cut up for the next round. The first
+        round is all the sites as one group: the audit of `target`. The
+        first cut is into groups that double in size (1, 1, 2, 2, 4...),
+        which shows how often sites fail whatever the rate; later cuts
+        are to the `group_size` of the outcomes so far, or to halves if
+        those are smaller.
+
+        Audits are all in the same conditions (see `audited`), so what
+        fails fails again, and a round's verdicts say which sites are at
+        fault. Groups that each pass may yet fail together, so what a
+        round accepts is audited with it all deleted together, in the
+        next round. If that fails, its sites are taken again in order:
+        rounds audit runs of them, from the first site on, the longest
+        run that passes is deleted, and a site is excluded once the run
+        up to it passes and the run with it fails. If the search's first
+        genotype fails its audit, no site can be told from another, and
+        the search is stopped.
+
+        Parameters
+        ----------
+        target : frozenset of int
+            A genotype within the newest trusted one.
+
+        Returns
+        -------
+        Generator[dict, dict, None]
+            Yields waves and is sent their verdicts.
+        """
+        groups = [sorted(self.trusted[-1] - target)]
+        rest: list = []  # sites that failed together, in order
+        window = 0  # how many of its first sites failed together, if any
+        taken: list = []  # each genotype this made trusted, its groups' sizes
+        alone = 0  # sites that failed alone
+        while True:
+            good = self.trusted[-1]
+            # the runs to audit: evenly spaced lengths, up to one that failed
+            top = window or len(rest)
+            count = min(max(1, self.b - 1), top)
+            runs = sorted({-(-i * top // count) for i in range(1, count + 1)})
+            masks = [*map(frozenset, groups)]
+            masks += [frozenset(rest[:run]) for run in runs]
+            tried = [good - m for m in masks]
+            got = yield from self.audited([good, *tried])
+            if got[good] != ACCEPT and len(self.trusted) == 1:
+                self.stopped = "control_rejected"
+                return
+            if got[good] != ACCEPT:  # what passed apart fails together
+                self.trusted.pop()
+                taken.pop()
+                rest, window = sorted(self.trusted[-1] - good) + rest, 0
+                continue
+            self.cache.update((g, got[g]) for g in tried)
+            passed = [g for g in groups if got[good - frozenset(g)] == ACCEPT]
+            failed = [g for g in groups if g not in passed]
+            self.excluded.update(*(g for g in failed if len(g) == 1))
+            alone += sum(len(g) == 1 for g in failed)
+            failed = [g for g in failed if len(g) > 1]
+            longest, window = 0, 0  # the longest run to pass; the next's
+            for run in runs:
+                if got[good - frozenset(rest[:run])] != ACCEPT:
+                    window = run - longest
+                    break
+                longest = run
+            after = good.difference(*passed, rest[:longest])
+            rest = rest[longest:]
+            if window == 1:  # the run up to it passed, and with it, failed
+                self.excluded.add(rest.pop(0))
+                window = 0
+            if after != good:
+                self.trusted.append(after)
+                taken.append((after, [len(g) for g in passed]))
+            elif not failed and not rest:
+                return  # nothing more to try, and it all passes together
+            outcomes = [(n, True) for _, sizes in taken for n in sizes]
+            outcomes += [(1, False)] * alone
+            size = group_size(outcomes + [(len(g), False) for g in failed])
+            groups = []
+            for g in failed:
+                if outcomes:
+                    step = min(size, -(-len(g) // 2))
+                    groups += [g[i : i + step] for i in range(0, len(g), step)]
+                    continue
+                start = 0  # the first cut: sizes 1, 1, 2, 2, 4...
+                while start < len(g):
+                    step = 2 ** ((len(groups)) // 2)
+                    groups.append(g[start : start + step])
+                    start += step
+
     def audit(self) -> typing.Generator[dict, dict, str]:
         """Re-evaluate the current genotype afresh and, if it fails, roll
-        back to the newest checkpoint that still passes.
+        back to the newest checkpoint that still passes; if
+        `audit_adaptive`, instead put back the sites that fail, by `sift`.
 
         Returns
         -------
@@ -382,6 +533,27 @@ class KnockoutSearch:
             `unresolved`, `recovered` or `exhausted_recovery`.
         """
         target = self.current
+        if self.audit_adaptive:
+            if target == self.trusted[-1]:
+                return "pass"  # audits accepted it already
+            self.phase = "audit"
+            self.commits_since_audit = 0
+            yield from self.sift(target)
+            self.current = self.trusted[-1]
+            if self.stopped:
+                return "unresolved"
+            if self.current == target:
+                self.audit_every *= 2
+                return "pass"
+            self.rollbacks += 1
+            self.checkpoints.append(self.current)
+            self.audit_every = max(1, self.audit_every // 2)
+            self.transitions.append(
+                (target, self.current, "rollback", "fresh_audit_rejected")
+            )
+            if self.rollbacks > self.max_rollbacks:
+                return "exhausted_recovery"
+            return "recovered"
         self.phase = "audit"
         verdict = (yield from self.evaluate([target], fresh=True))[target]
         self.memory.observe(target, frozenset(), verdict)
@@ -481,8 +653,12 @@ class KnockoutSearch:
             `retained`, `certified`, `status`, `proposal_batches`,
             `rollbacks`, `transitions` and `unresolved`.
         """
+        # with adaptive audits, only what an audit accepted
+        retained = self.current
+        if self.audit_adaptive:
+            retained = self.trusted[-1]
         return {
-            "retained": self.current,
+            "retained": retained,
             "certified": certified,
             "status": reason,
             "proposal_batches": self.batches,

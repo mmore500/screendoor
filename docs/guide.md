@@ -32,7 +32,7 @@ with none: one that failed, or sent no `payload`.
 
 | Action | Effect |
 |---|---|
-| `scd.churn.launch([{"key", "cmd", "env"}, ...])` | submit trials; a key already submitted is dropped |
+| `scd.churn.launch([{"key", "cmd", "env", "weight"}, ...])` | submit trials; a key already submitted is dropped. `weight` (optional, default 1) is how much of `trial_batchsize` the trial takes up |
 | `scd.churn.memo(data)` | record state for the next call |
 | `scd.churn.succeed(summary)`, `fail(reason)` | complete the dispatch |
 | `scd.churn.progress(done, total, message=None)`, `eta(when)` | notify |
@@ -60,7 +60,7 @@ uses to re-run each churn call from the state it saw.
 | `scd.assaylib.skeletonization.minesweeper` | 4-stage Minesweeper (Rees-Garbutt 2020) |
 | `scd.assaylib.skeletonization.hybrid` | Multi-dose pilot, then top-down ddmin or bottom-up sieve |
 | `scd.assaylib.skeletonization.gama` | Guess/Add/Mate genetic algorithm (Rees-Garbutt 2020) |
-| `scd.assaylib.skeletonization.staged` | Cheap screens for lethal knockouts, a regression ranking, then one confirmed cutoff |
+| `scd.assaylib.skeletonization.staged` | Cheap screens for the minimal critical sets, then the rest sorted by regression and cut at the longest subcritical prefix |
 
 Each skeletonization module also has `make_churn(*,
 num_control_trials=40)`. The wildtype runs that many times as controls,
@@ -89,7 +89,7 @@ Avida.
 | `meta_project`, `meta_experiment`, `meta_treatment`, `meta_user` | `"default"` | labels |
 | `meta_redo` | `"0"` | label; bump it to run the same labels again |
 | `meta_seed` | random | integer |
-| `trial_batchsize` | 1 | trials per job (array task) |
+| `trial_batchsize` | 1 | trials per job (array task); the most total `weight`, for trials that give one |
 | `trial_batch_timeout` | none | seconds per job, enforced by the orchestrator |
 | `trial_maxretry` | 3 | relaunches of a trial whose job vanished |
 | `churn_maxretry` | 5 | retries of a churn call that raised, before the dispatch fails |

@@ -1,6 +1,6 @@
-"""Skeletonize in stages: screen out lethal knockouts with a cheap
-pass/fail test, rank the remaining sites by regression on scored trials,
-then confirm one cutoff."""
+"""Skeletonize in stages: find the minimal critical sets with a cheap
+pass/fail test, then sort the remaining sites by their cost, estimated by
+regression on scored trials, and confirm the longest subcritical prefix."""
 
 from ....auxlib._lazy_attach_stub import lazy_attach_stub
 

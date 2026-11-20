@@ -8,8 +8,10 @@ def launch(trials: list[dict]) -> dict:
     ----------
     trials : list of dict
         The trials to request, each `{"key": ..., "cmd": str, "env": {str:
-        str}}`. `key` is any JSON value; `env` is optional, and names
-        starting `SCREENDOOR_` are reserved.
+        str}, "weight": number}`. `key` is any JSON value; `env` is
+        optional, and names starting `SCREENDOOR_` are reserved. `weight`
+        is optional: how much of a job's `trial_batchsize` the trial takes
+        up, 1 if not given.
 
     Returns
     -------
@@ -19,14 +21,15 @@ def launch(trials: list[dict]) -> dict:
     Raises
     ------
     TypeError
-        If a `cmd`, or an `env` name or value, is not a string.
+        If a `cmd`, or an `env` name or value, is not a string, or a
+        `weight` is not a number.
     ValueError
-        If a trial has unknown fields, a reserved `env` name, or a key that
-        is not JSON-serializable.
+        If a trial has unknown fields, a reserved `env` name, a `weight`
+        that is not positive, or a key that is not JSON-serializable.
     """
     checked = []
     for t in trials:
-        unknown = set(t) - {"key", "cmd", "env"}
+        unknown = set(t) - {"key", "cmd", "env", "weight"}
         if unknown:
             raise ValueError(f"unknown trial fields {sorted(unknown)}")
         if not isinstance(t["cmd"], str):
@@ -41,5 +44,15 @@ def launch(trials: list[dict]) -> dict:
             if name.startswith("SCREENDOOR_"):
                 raise ValueError(f"env name {name!r} is reserved")
         check_json(t["key"], "trial key")
-        checked.append({"key": t["key"], "cmd": t["cmd"], "env": env})
+        trial = {"key": t["key"], "cmd": t["cmd"], "env": env}
+        if "weight" in t:
+            weight = t["weight"]
+            if isinstance(weight, bool) or not isinstance(
+                weight, (int, float)
+            ):
+                raise TypeError("trial weight must be a number")
+            if not weight > 0:
+                raise ValueError("trial weight must be positive")
+            trial["weight"] = weight
+        checked.append(trial)
     return make_action("launch", trials=checked)

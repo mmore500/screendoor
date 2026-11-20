@@ -8,6 +8,12 @@ from screendoor.assaylib import skeletonization
 from screendoor.assaylib.skeletonization.staged._StagedSearch import (
     StagedSearch,
 )
+from screendoor.assaylib.skeletonization.staged._find_maximal_subcritical_set_sort import (
+    _SubcriticalSetSearch,
+)
+from screendoor.assaylib.skeletonization.staged._find_minimal_critical_sets_bisect import (
+    _CriticalSetSearch,
+)
 from screendoor.assaylib.skeletonization.staged._fit_effects import fit_effects
 from screendoor.auxlib import decode_sites
 from screendoor.auxlib._DispatchContext import load_dispatches
@@ -112,7 +118,9 @@ def test_screens_find_critical_sites_and_redundant_sets():
 
 
 def test_screens_answer_what_earlier_trials_imply():
-    search = StagedSearch(10, {}, seed=0, num_control_trials=2)
+    search = _CriticalSetSearch(
+        StagedSearch(10, {}, seed=0, num_control_trials=2)
+    )
     run = search.screen([frozenset({1, 2, 3}), frozenset({4})], 0)
     assert next(run) == [
         ("screen", 0, frozenset({1, 2, 3})),
@@ -122,7 +130,7 @@ def test_screens_answer_what_earlier_trials_imply():
         run.send([False, True])
     assert stop.value.value == [False, True]
     assert search.known(frozenset({1, 3}), 0) is False  # inside a pass
-    assert search.known(frozenset({4, 9}), 0) is True  # holds a lethal set
+    assert search.known(frozenset({4, 9}), 0) is True  # holds a failing set
     assert search.known(frozenset({1, 9}), 0) is None
     assert search.known(frozenset(), 0) is False  # the wildtype
     # nothing new is asked for, and a repeat within a wave is asked once
@@ -131,8 +139,8 @@ def test_screens_answer_what_earlier_trials_imply():
 
 
 def test_shrink_gives_up_past_max_set_size():
-    search = StagedSearch(
-        12, {"max_set_size": 2}, seed=0, num_control_trials=2
+    search = _CriticalSetSearch(
+        StagedSearch(12, {"max_set_size": 2}, seed=0, num_control_trials=2)
     )
 
     def shrunk(lethal):
@@ -156,7 +164,7 @@ def test_one_screen_leaves_small_losses_adding_up_to_the_ranking():
     that no site of them fails alone, so none is kept."""
     costs = dict.fromkeys(range(10, 18), 0.02)
     toy = Toy(40, critical={3}, sets=[{5, 22}], costs=costs, detects=(0.10,))
-    search, result, _ = drive(toy)
+    search, result, asked = drive(toy)
     assert result["critical"] == [3] and result["kept"] == [5]
     assert result["redundant"] == [(0, [5, 22])]
     assert result["adding_up"] and not result["certified"]
@@ -165,7 +173,8 @@ def test_one_screen_leaves_small_losses_adding_up_to_the_ranking():
         for tier, s in result["adding_up"]
     )
     # each jackknifed knockout is scored once, however many sets hold it
-    assert search.stats["jackknife_trials"] == 4 * len(search.scored)
+    jackknifed = {r[2] for r in asked if r[:2] == ("score", "jackknife")}
+    assert search.stats["jackknife_trials"] == 4 * len(jackknifed)
     # the ranking and confirmation then delete what fits the margin
     deleted = frozenset(range(40)) - result["retained"]
     assert toy.loss(deleted) <= 0.06 and len(deleted) >= 30
@@ -241,7 +250,9 @@ def test_jackknife_of_a_pair_tests_each_site_alone():
 
 
 def test_release_frees_a_member_whose_set_is_held_elsewhere():
-    search = StagedSearch(10, {}, seed=0, num_control_trials=2)
+    search = _CriticalSetSearch(
+        StagedSearch(10, {}, seed=0, num_control_trials=2)
+    )
     for redundant in ({1, 2}, {2, 3}, {5, 6}):
         search.redundant.append((0, frozenset(redundant)))
         search.kept.add(min(redundant))
@@ -301,6 +312,166 @@ def test_ranking_skips_samples_that_are_not_viable():
     assert result["retained"] & {1, 2, 3, 4}  # never all four deleted
 
 
+def test_reconfirm_judges_an_accepted_knockout_by_costlier_trials():
+    """The costlier trial sees three times each weak site's loss, so it
+    accepts fewer deleted than the confirmation alone does."""
+    costs = dict.fromkeys(range(20, 30), 0.012)
+    toy = Toy(50, critical={3}, costs=costs)
+
+    def run(toy=toy, **kw):
+        kw = {"abs_tol": 0.06, **kw}
+        search = StagedSearch(toy.n, kw, seed=1, num_control_trials=40)
+        gen, answers, asked = search.run(), None, []
+        while True:
+            try:
+                wave = gen.send(answers)
+            except StopIteration as stop:
+                return search, stop.value, asked
+            asked += wave
+            answers = []
+            for kind, stage, deleted, *index in wave:
+                if kind == "screen":
+                    answers.append(toy.fails(deleted, stage))
+                    continue
+                rng = random.Random(f"{stage}:{sorted(deleted)}:{index}")
+                scale = 3.0 if stage in ("reconfirm", "recontrol") else 1.0
+                answers.append(
+                    -scale * toy.loss(deleted) + rng.gauss(0.0, 0.02)
+                )
+
+    _, alone, asked = run()
+    assert not any(r[1] in ("recontrol", "reconfirm") for r in asked)
+    assert all("reconfirm_replicates" not in c for c in alone["confirmations"])
+    search, both, asked = run(reconfirm={"num_control_trials": 30})
+    recontrols = [r for r in asked if r[1] == "recontrol"]
+    assert sorted(r[3] for r in recontrols) == list(range(30))
+    assert all(r[2] == frozenset() for r in recontrols)
+    assert search.recontrols.n == 30 and search.controls.n == 40
+    deleted = frozenset(range(50)) - both["retained"]
+    assert len(deleted) < 50 - len(alone["retained"])
+    assert 3.0 * toy.loss(deleted) <= 0.06
+    # a knockout the first confirmation rejects is not reconfirmed
+    again = [c for c in both["confirmations"] if "reconfirm_replicates" in c]
+    assert again and any(not c["accepted"] for c in again)
+    reconfirmed = {r[2] for r in asked if r[1] == "reconfirm"}
+    assert len(reconfirmed) == len(again)
+    with pytest.raises(ValueError, match="num_control_trials"):
+        run(reconfirm={})
+    # with `every` 0, the costlier trials judge only the prefix the
+    # first confirmation settles on, and it searches again below what
+    # they reject
+    search, late, asked = run(reconfirm={"num_control_trials": 30, "every": 0})
+    assert late["retained"] == both["retained"]
+    rounds = late["confirmations"]
+    first = next(i for i, c in enumerate(rounds) if "replicates" not in c)
+    assert rounds[first]["deleted"] == 50 - len(alone["retained"])
+    assert not rounds[first]["accepted"]
+    below = [c["deleted"] for c in rounds[first + 1 :]]
+    assert below and max(below) < rounds[first]["deleted"]
+    assert late["reconfirm_every"] == 0
+    # adaptive, a costlier test that fails halves the wait, and one that
+    # passes doubles it
+    again = {"num_control_trials": 30, "every": 4, "adaptive": True}
+    search, paced, asked = run(reconfirm=again)
+    assert paced["retained"] == both["retained"]
+    costlier = [
+        c for c in paced["confirmations"] if "reconfirm_replicates" in c
+    ]
+    verdicts = [c["accepted"] for c in costlier]
+    assert True in verdicts and False in verdicts
+    # what is deleted is the longest knockout the costlier test accepted
+    assert 50 - len(paced["retained"]) == max(
+        c["deleted"] for c in costlier if c["accepted"]
+    )
+    every = 4
+    for accepted in verdicts:
+        every = every * 2 if accepted else max(1, every // 2)
+    assert paced["reconfirm_every"] == every
+    # where the two agree, a search of few acceptances takes one costlier
+    # test, however it waits
+    harmless = Toy(40, critical={3})
+    for every in (0, 1, 8):
+        again = {"num_control_trials": 30, "every": every}
+        _, same, asked = run(harmless, reconfirm=again)
+        assert same["retained"] == {3}
+        assert len({r[2] for r in asked if r[1] == "reconfirm"}) == 1
+    with pytest.raises(ValueError, match="every"):
+        run(reconfirm={"num_control_trials": 30, "every": -1})
+
+
+def test_early_looks_judge_a_knockout_far_from_the_limit_on_few_scores():
+    """Ten sites gain a little each, so their knockout is far over the
+    limit, and a look at an eighth of the first look's scores accepts it."""
+    toy = Toy(30, critical={3}, costs=dict.fromkeys(range(10, 20), -0.03))
+    again = {"num_control_trials": 30}
+    search, late, asked = drive(
+        toy, sd=0.05, max_replicates=256, reconfirm=again
+    )
+    first, refirst = search.first_look, search.refirst_look
+    assert first >= 8 and late["retained"] == {3}
+    assert [c["replicates"] for c in late["confirmations"][:1]] == [first]
+    assert late["confirmations"][-1]["reconfirm_replicates"] == refirst
+    search, early, asked = drive(
+        toy, sd=0.05, max_replicates=256, reconfirm=again, early_looks=3
+    )
+    assert early["retained"] == {3}
+    looks = [math.ceil(first / 2**k) for k in (3, 2, 1, 0)]
+    assert early["confirmations"][0]["replicates"] in looks[:3]
+    assert early["confirmations"][-1]["reconfirm_replicates"] < refirst
+    for stage in ("confirm", "reconfirm"):
+        most = 1 + max(r[3] for r in asked if r[1] == stage)
+        assert (
+            most
+            == early["confirmations"][stage == "reconfirm" and -1][
+                "reconfirm_replicates"
+                if stage == "reconfirm"
+                else "replicates"
+            ]
+        )
+    # a second confirmation can look early where the first does not
+    own = {**again, "early_looks": 3}
+    search, mixed, asked = drive(
+        toy, sd=0.05, max_replicates=256, reconfirm=own
+    )
+    assert mixed["confirmations"][0]["replicates"] == first
+    assert mixed["confirmations"][-1]["reconfirm_replicates"] < refirst
+
+
+def test_two_sided_counts_a_gain_as_a_loss():
+    """Sites 10 to 19 each gain half the margin: one-sided, all are
+    deleted with the harmless ones; two-sided, only as many as leave the
+    score within the margin of the controls' mean."""
+    gains = dict.fromkeys(range(10, 20), -0.03)
+    toy = Toy(30, critical={3}, sets=[{5, 6}], costs=gains)
+    search, one, _ = drive(toy)
+    assert one["retained"] == {3, 5}
+    search, two, _ = drive(toy, two_sided=True)
+    deleted = frozenset(range(30)) - two["retained"]
+    assert {3, 5} <= two["retained"] and len(deleted & set(gains)) <= 2
+    assert deleted >= frozenset(range(30)) - {3, 5} - set(gains)
+    # the ranking sorts by the size of an effect, so the gains come last
+    order = two["ranking"]
+    assert set(order[-10:]) == set(gains)
+    # a confirmation rejects scores as far over the controls' mean as
+    # it would under it
+    test, alpha = search.sequential, search.sequential.alpha(0)
+    judge = _SubcriticalSetSearch(search).judge
+    over = [test.mean + 0.2] * 50
+    under = [test.mean - 0.2] * 50
+    level = [test.mean] * 50
+    assert judge(test, over, alpha) == "reject"
+    assert judge(test, under, alpha) == "reject"
+    assert judge(test, level, alpha) == "accept"
+    one_sided = StagedSearch(
+        30, {"abs_tol": 0.06}, seed=1, num_control_trials=2
+    )
+    assert _SubcriticalSetSearch(one_sided).judge(test, over, alpha) == (
+        "accept"
+    )
+    # the jackknife fails a knockout that gains too much, as one that loses
+    assert search.cost(-0.1) == 0.1 and one_sided.cost(-0.1) == -0.1
+
+
 @pytest.mark.parametrize(
     "kw",
     [
@@ -309,6 +480,8 @@ def test_ranking_skips_samples_that_are_not_viable():
         {"batch_size": 0},
         {"max_set_size": 0},
         {"jackknife_replicates": 0},
+        {"early_looks": -1},
+        {"reconfirm": {"num_control_trials": 2, "early_looks": -1}},
     ],
 )
 def test_staged_search_refuses_bad_kwargs(kw):
@@ -410,6 +583,25 @@ def test_staged_churn_is_pure_and_replayable():
     assert all(json.dumps(t["key"], sort_keys=True) in keys for t in asked)
 
 
+def test_staged_dispatch_of_a_pool_of_one_site():
+    def fake(t):
+        out = frozenset(range(2)) - decode_sites(t["env"]["retained"])
+        if "screen" in t["env"]:
+            return 0 not in out
+        rng = random.Random(json.dumps(t["key"], sort_keys=True))
+        return rng.gauss(0.0, 0.02)
+
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.staged",
+        {**KW, "n_sites": 2},
+        fake_trial=fake,
+    )
+    assert r["completed"]["outcome"] == "succeeded", r["completed"]
+    s = r["completed"]["summary"]
+    assert s["critical"] == "0" and s["retained"] == "0"
+    assert s["effects_error"] is None and s["stats"]["ranking_trials"] == 0
+
+
 def test_staged_screens_take_their_own_cmd_and_env():
     seen = set()
 
@@ -439,6 +631,38 @@ def test_staged_screens_take_their_own_cmd_and_env():
         ("long", "1", "full"),
         ("long", None, "full"),
     }
+
+
+def test_staged_reconfirmation_takes_its_own_env_and_controls():
+    def fake(t):
+        costly = "reconfirm" in t["key"]
+        assert t["env"].get("size") == ("big" if costly else None)
+        assert t["env"].get("reconfirm") == ("1" if costly else None)
+        return fake_trial(t)
+
+    r = simulate_dispatch(
+        "scd.assaylib.skeletonization.staged",
+        {
+            **KW,
+            "reconfirm": {
+                "num_control_trials": 20,
+                "env": {"size": "big"},
+                "cmd": "y",
+            },
+        },
+        fake_trial=fake,
+    )
+    assert r["completed"]["outcome"] == "succeeded", r["completed"]
+    s = r["completed"]["summary"]
+    assert s["reconfirm_control"]["n"] == 20 and s["control"]["n"] == 40
+    assert s["confirmations"][-1]["reconfirm_replicates"] > 0
+    again = [t for t in r["trials"] if "reconfirm" in t["key"]]
+    assert all(t["request"]["cmd"] == "y" for t in again)
+    controls = [t["key"] for t in again if t["key"]["retained"] == "0-29"]
+    assert sorted(k["replicate"] for k in controls) == list(range(20))
+    assert len(again) > 20
+    plain = [t for t in r["trials"] if "reconfirm" not in t["key"]]
+    assert all(t["request"]["cmd"] == "x" for t in plain)
 
 
 @pytest.mark.parametrize(
