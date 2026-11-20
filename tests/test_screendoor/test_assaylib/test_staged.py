@@ -8,6 +8,12 @@ from screendoor.assaylib import skeletonization
 from screendoor.assaylib.skeletonization.staged._StagedSearch import (
     StagedSearch,
 )
+from screendoor.assaylib.skeletonization.staged._find_maximal_subcritical_set_sort import (
+    _SubcriticalSetSearch,
+)
+from screendoor.assaylib.skeletonization.staged._find_minimal_critical_sets_bisect import (
+    _CriticalSetSearch,
+)
 from screendoor.assaylib.skeletonization.staged._fit_effects import fit_effects
 from screendoor.auxlib import decode_sites
 from screendoor.auxlib._DispatchContext import load_dispatches
@@ -112,7 +118,9 @@ def test_screens_find_critical_sites_and_redundant_sets():
 
 
 def test_screens_answer_what_earlier_trials_imply():
-    search = StagedSearch(10, {}, seed=0, num_control_trials=2)
+    search = _CriticalSetSearch(
+        StagedSearch(10, {}, seed=0, num_control_trials=2)
+    )
     run = search.screen([frozenset({1, 2, 3}), frozenset({4})], 0)
     assert next(run) == [
         ("screen", 0, frozenset({1, 2, 3})),
@@ -122,7 +130,7 @@ def test_screens_answer_what_earlier_trials_imply():
         run.send([False, True])
     assert stop.value.value == [False, True]
     assert search.known(frozenset({1, 3}), 0) is False  # inside a pass
-    assert search.known(frozenset({4, 9}), 0) is True  # holds a lethal set
+    assert search.known(frozenset({4, 9}), 0) is True  # holds a failing set
     assert search.known(frozenset({1, 9}), 0) is None
     assert search.known(frozenset(), 0) is False  # the wildtype
     # nothing new is asked for, and a repeat within a wave is asked once
@@ -131,8 +139,8 @@ def test_screens_answer_what_earlier_trials_imply():
 
 
 def test_shrink_gives_up_past_max_set_size():
-    search = StagedSearch(
-        12, {"max_set_size": 2}, seed=0, num_control_trials=2
+    search = _CriticalSetSearch(
+        StagedSearch(12, {"max_set_size": 2}, seed=0, num_control_trials=2)
     )
 
     def shrunk(lethal):
@@ -156,7 +164,7 @@ def test_one_screen_leaves_small_losses_adding_up_to_the_ranking():
     that no site of them fails alone, so none is kept."""
     costs = dict.fromkeys(range(10, 18), 0.02)
     toy = Toy(40, critical={3}, sets=[{5, 22}], costs=costs, detects=(0.10,))
-    search, result, _ = drive(toy)
+    search, result, asked = drive(toy)
     assert result["critical"] == [3] and result["kept"] == [5]
     assert result["redundant"] == [(0, [5, 22])]
     assert result["adding_up"] and not result["certified"]
@@ -165,7 +173,8 @@ def test_one_screen_leaves_small_losses_adding_up_to_the_ranking():
         for tier, s in result["adding_up"]
     )
     # each jackknifed knockout is scored once, however many sets hold it
-    assert search.stats["jackknife_trials"] == 4 * len(search.scored)
+    jackknifed = {r[2] for r in asked if r[:2] == ("score", "jackknife")}
+    assert search.stats["jackknife_trials"] == 4 * len(jackknifed)
     # the ranking and confirmation then delete what fits the margin
     deleted = frozenset(range(40)) - result["retained"]
     assert toy.loss(deleted) <= 0.06 and len(deleted) >= 30
@@ -241,7 +250,9 @@ def test_jackknife_of_a_pair_tests_each_site_alone():
 
 
 def test_release_frees_a_member_whose_set_is_held_elsewhere():
-    search = StagedSearch(10, {}, seed=0, num_control_trials=2)
+    search = _CriticalSetSearch(
+        StagedSearch(10, {}, seed=0, num_control_trials=2)
+    )
     for redundant in ({1, 2}, {2, 3}, {5, 6}):
         search.redundant.append((0, frozenset(redundant)))
         search.kept.add(min(redundant))
@@ -357,7 +368,7 @@ def test_reconfirm_judges_an_accepted_knockout_by_costlier_trials():
     assert not rounds[first]["accepted"]
     below = [c["deleted"] for c in rounds[first + 1 :]]
     assert below and max(below) < rounds[first]["deleted"]
-    assert search.reconfirm_every == 0
+    assert late["reconfirm_every"] == 0
     # adaptive, a costlier test that fails halves the wait, and one that
     # passes doubles it
     again = {"num_control_trials": 30, "every": 4, "adaptive": True}
@@ -375,7 +386,7 @@ def test_reconfirm_judges_an_accepted_knockout_by_costlier_trials():
     every = 4
     for accepted in verdicts:
         every = every * 2 if accepted else max(1, every // 2)
-    assert search.reconfirm_every == paced["reconfirm_every"] == every
+    assert paced["reconfirm_every"] == every
     # where the two agree, a search of few acceptances takes one costlier
     # test, however it waits
     harmless = Toy(40, critical={3})
@@ -444,16 +455,19 @@ def test_two_sided_counts_a_gain_as_a_loss():
     # a confirmation rejects scores as far over the controls' mean as
     # it would under it
     test, alpha = search.sequential, search.sequential.alpha(0)
+    judge = _SubcriticalSetSearch(search).judge
     over = [test.mean + 0.2] * 50
     under = [test.mean - 0.2] * 50
     level = [test.mean] * 50
-    assert search.judge(test, over, alpha) == "reject"
-    assert search.judge(test, under, alpha) == "reject"
-    assert search.judge(test, level, alpha) == "accept"
+    assert judge(test, over, alpha) == "reject"
+    assert judge(test, under, alpha) == "reject"
+    assert judge(test, level, alpha) == "accept"
     one_sided = StagedSearch(
         30, {"abs_tol": 0.06}, seed=1, num_control_trials=2
     )
-    assert one_sided.judge(test, over, alpha) == "accept"
+    assert _SubcriticalSetSearch(one_sided).judge(test, over, alpha) == (
+        "accept"
+    )
     # the jackknife fails a knockout that gains too much, as one that loses
     assert search.cost(-0.1) == 0.1 and one_sided.cost(-0.1) == -0.1
 

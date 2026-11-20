@@ -376,7 +376,14 @@ use `replicates` with `accept_fraction` to get the same kind of verdicts.
 `scd.assaylib.skeletonization.staged` is for a genome where a cheap,
 pass/fail *screen* can spot large failures, and only a long, scored trial
 can measure small ones. It assumes **no rescue**: a knockout that fails
-keeps failing with more sites out. It runs in three stages.
+keeps failing with more sites out. After the wildtype controls, it runs
+in two stages, each its own function in the package:
+`find_minimal_critical_sets_bisect` (the screens) finds the minimal
+*critical* sets, those whose knockout fails, and retains enough of each;
+`find_maximal_subcritical_set_sort` (the ranking and the confirmation)
+sorts the rest by cost and deletes the longest prefix whose knockout
+passes, a *subcritical* set. The prefix is maximal along the sort, not
+over every set.
 
 1. **Screens.** Random knockouts are screened at a dose that fails
    about half the time, and each failure is shrunk by bisection, several

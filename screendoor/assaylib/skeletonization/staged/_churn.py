@@ -116,8 +116,8 @@ def make_churn(
     *, num_control_trials: int = 40
 ) -> typing.Callable[[dict, list[dict], list[dict], list[dict]], list[dict]]:
     """Create a churn function that skeletonizes in stages: screens for
-    lethal knockouts, a ranking of the remaining sites by regression, and
-    a confirmed cutoff.
+    the minimal critical sets, a ranking of the remaining sites by
+    regression, and a confirmed cutoff.
 
     Every tick replays a `StagedSearch` from the start over the recorded
     trials, until it asks for a trial not yet in; churn then launches the
@@ -187,8 +187,8 @@ def make_churn(
                 stage = PHASES.get(search.phase, 1)  # of 4: the rest screen
                 message = (
                     f"{search.policy}: {search.phase}, wave {waves}, "
-                    f"{len(search.critical)} critical, "
-                    f"{len(search.kept)} kept, "
+                    f"{len(search.tally['critical'])} critical, "
+                    f"{len(search.tally['kept'])} kept, "
                     f"{waiting + len(missing)} trials outstanding"
                 )
                 launch = (
